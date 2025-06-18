@@ -1,0 +1,30 @@
+---
+title: "Untitled"
+format: pdf
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+gas_demand <-
+  read.csv('Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv') %>%
+  mutate(across(c('Applicable.At', 'Applicable.For', 'Generated.Time'),
+                function(x) as.Date(x, format = '%d/%m/%Y')),
+         time_stamp = Applicable.For) %>%
+  filter(Quality.Indicator == '') %>%
+  pivot_wider(id_cols = time_stamp, names_from = Data.Item, values_from = Value)
+```
+
+```{r}
+ggplot(gas_demand,
+       aes(x = time_stamp, y = .data[['Demand Actual, LDZ (SC), D+6']])) +
+  geom_line() +
+  ggtitle('Demand Actual, LDZ (SC), D+6')
+```
+
+
+

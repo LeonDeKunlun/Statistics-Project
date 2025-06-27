@@ -6,24 +6,64 @@ editor_options:
 ---
 
 ```{r}
+# load packages
 library(tidyverse)
 ```
 
 ```{r}
+# read the data
 gas_demand <-
-  read.csv('Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv') %>%
-  mutate(across(c('Applicable.At', 'Applicable.For', 'Generated.Time'),
-                function(x) as.Date(x, format = '%d/%m/%Y')),
-         time_stamp = Applicable.For) %>%
-  filter(Quality.Indicator == '') %>%
-  pivot_wider(id_cols = time_stamp, names_from = Data.Item, values_from = Value)
+  read.csv(
+    "Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv",
+    check.names = FALSE) %>%
+  mutate(
+    across(
+      c(`Applicable At`, `Applicable For`, `Generated Time`),
+      \(x) as.Date(x, format = "%d/%m/%Y")),
+    across(
+      `Data Item`,
+      \(x) case_match(
+        x,
+        "Demand Actual, LDZ (SC), D+6" ~ "Gas Demand",
+        "Composite Weather Variable, Actual, LDZ(SC), D+1" ~
+          "Composite Weather Variable"))) %>%
+  rename(`Gas Day` = `Applicable For`)
 ```
 
 ```{r}
-ggplot(gas_demand,
-       aes(x = time_stamp, y = .data[['Demand Actual, LDZ (SC), D+6']])) +
-  geom_line() +
-  ggtitle('Demand Actual, LDZ (SC), D+6')
+# summaries of Gas Demand
+gas_demand %>%
+  filter(`Data Item` == "Gas Demand") %>%
+  ggplot(aes(x = `Gas Day`, y = Value, colour = `Quality Indicator`)) +
+  geom_point() +
+  labs(y = "Gas Demand") +
+  ggtitle("Gas Demand vs Gas Day")
+```
+
+```{r}
+# summaries of Composite Weather Variable
+gas_demand %>%
+  filter(`Data Item` == "Composite Weather Variable") %>%
+  ggplot(aes(x = `Gas Day`, y = Value, colour = `Quality Indicator`)) +
+  geom_point() +
+  labs(y = "Composite Weather Variable") +
+  ggtitle("Composite Weather Variable vs Gas Day")
+```
+
+```{r}
+gas_demand_wide <- gas_demand %>%
+  mutate(across(Value, \(x) if_else(`Quality Indicator` == "", x, NA))) %>%
+  pivot_wider(
+    id_cols = `Gas Day`,
+    names_from = `Data Item`,
+    values_from = Value)
+```
+
+```{r}
+gas_demand_wide %>%
+  ggplot(aes(x = `Composite Weather Variable`, y = `Gas Demand`)) +
+  geom_point() +
+  ggtitle("Demand Actual, LDZ (SC), D+6")
 ```
 
 

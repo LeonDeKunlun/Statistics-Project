@@ -6,64 +6,104 @@ editor_options:
 ---
 
 ```{r}
+sys_locale <- "en_GB.utf8"
+Sys.setlocale(locale = sys_locale)
+```
+
+```{r}
 # load packages
 library(tidyverse)
+library(jsonlite)
 ```
 
 ```{r}
 # read the data
 gas_demand <-
-  read.csv(
-    "Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv",
+  utils::read.csv(
+    file = "Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv",
     check.names = FALSE) %>%
-  mutate(
-    across(
-      c(`Applicable At`, `Applicable For`, `Generated Time`),
-      \(x) as.Date(x, format = "%d/%m/%Y")),
-    across(
+  dplyr::rename(`Gas Day` = `Applicable For`) %>%
+  dplyr::mutate(
+    dplyr::across(
+      `Gas Day`,
+      . %>% as.Date(format = "%d/%m/%Y")),
+    dplyr::across(
       `Data Item`,
-      \(x) case_match(
-        x,
+      . %>% dplyr::case_match(
         "Demand Actual, LDZ (SC), D+6" ~ "Gas Demand",
         "Composite Weather Variable, Actual, LDZ(SC), D+1" ~
-          "Composite Weather Variable"))) %>%
-  rename(`Gas Day` = `Applicable For`)
+          "Composite Weather Variable")))
+```
+
+```{r}
+# fetch public holiday data
+holidays <-
+  jsonlite::fromJSON(
+    txt = "https://www.gov.uk/bank-holidays.json"
+  )$scotland$events$date %>%
+  as.Date(format = "%Y-%m-%d") %>%
+  as.data.frame.vector(nm = "Holiday")
 ```
 
 ```{r}
 # summaries of Gas Demand
 gas_demand %>%
-  filter(`Data Item` == "Gas Demand") %>%
-  ggplot(aes(x = `Gas Day`, y = Value, colour = `Quality Indicator`)) +
-  geom_point() +
-  labs(y = "Gas Demand") +
-  ggtitle("Gas Demand vs Gas Day")
+  dplyr::filter(`Data Item` == "Gas Demand") %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Gas Day`,
+    y = Value,
+    colour = `Quality Indicator`)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(
+    y = "Gas Demand",
+    title = "Gas Demand vs Gas Day")
 ```
 
 ```{r}
 # summaries of Composite Weather Variable
 gas_demand %>%
-  filter(`Data Item` == "Composite Weather Variable") %>%
-  ggplot(aes(x = `Gas Day`, y = Value, colour = `Quality Indicator`)) +
-  geom_point() +
-  labs(y = "Composite Weather Variable") +
-  ggtitle("Composite Weather Variable vs Gas Day")
+  dplyr::filter(`Data Item` == "Composite Weather Variable") %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Gas Day`,
+    y = Value,
+    colour = `Quality Indicator`)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(
+    y = "Composite Weather Variable",
+    title = "Composite Weather Variable vs Gas Day")
 ```
 
 ```{r}
-gas_demand_wide <- gas_demand %>%
-  mutate(across(Value, \(x) if_else(`Quality Indicator` == "", x, NA))) %>%
-  pivot_wider(
+gas_demand_wide <-
+  gas_demand %>%
+  # remove outliers
+  dplyr::mutate(dplyr::across(
+    Value,
+    \(.) dplyr::if_else(`Quality Indicator` == "", ., NA))) %>%
+  # transform the data frame
+  tidyr::pivot_wider(
     id_cols = `Gas Day`,
     names_from = `Data Item`,
-    values_from = Value)
+    values_from = Value) %>%
+  # add day of the week
+  dplyr::mutate(
+    `Day of the Week` = `Gas Day` %>% lubridate::wday(label = TRUE)) %>%
+  # add public holiday data
+  dplyr::left_join(
+    holidays,
+    by = dplyr::join_by(`Gas Day` == Holiday),
+    keep = TRUE,
+    relationship = "one-to-one") %>%
+  dplyr::mutate(dplyr::across(Holiday, \(.) !is.na(.)))
 ```
 
 ```{r}
 gas_demand_wide %>%
-  ggplot(aes(x = `Composite Weather Variable`, y = `Gas Demand`)) +
-  geom_point() +
-  ggtitle("Demand Actual, LDZ (SC), D+6")
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Composite Weather Variable`,
+    y = `Gas Demand`)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(title = "Demand Actual, LDZ (SC), D+6")
 ```
 
 

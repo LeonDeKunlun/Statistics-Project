@@ -17,6 +17,11 @@ library(jsonlite)
 ```
 
 ```{r}
+# set global theme
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 12))
+```
+
+```{r}
 # read the data
 gas_demand <-
   utils::read.csv(
@@ -53,7 +58,9 @@ gas_demand %>%
     x = `Gas Day`,
     y = Value,
     colour = `Quality Indicator`)) +
-  ggplot2::geom_point() +
+  ggplot2::scale_colour_manual(
+    values = c("black", "A" = "red", "L" = "orange")) +
+  ggplot2::geom_point(size = 1) +
   ggplot2::labs(
     y = "Gas Demand",
     title = "Gas Demand vs Gas Day")
@@ -67,7 +74,9 @@ gas_demand %>%
     x = `Gas Day`,
     y = Value,
     colour = `Quality Indicator`)) +
-  ggplot2::geom_point() +
+  ggplot2::scale_colour_manual(
+    values = c("black", "A" = "red", "L" = "orange")) +
+  ggplot2::geom_point(size = 1) +
   ggplot2::labs(
     y = "Composite Weather Variable",
     title = "Composite Weather Variable vs Gas Day")
@@ -79,7 +88,9 @@ gas_demand_wide <-
   # remove outliers
   dplyr::mutate(dplyr::across(
     Value,
-    \(.) dplyr::if_else(`Quality Indicator` == "", ., NA))) %>%
+    \(.) dplyr::if_else(
+      `Data Item` == "Gas Demand" & `Quality Indicator` != "",
+      NA, .))) %>%
   # transform the data frame
   tidyr::pivot_wider(
     id_cols = `Gas Day`,

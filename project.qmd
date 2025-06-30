@@ -37,7 +37,8 @@ gas_demand <-
       . %>% dplyr::case_match(
         "Demand Actual, LDZ (SC), D+6" ~ "Gas Demand",
         "Composite Weather Variable, Actual, LDZ(SC), D+1" ~
-          "Composite Weather Variable")))
+          "Composite Weather Variable"))) %>%
+  dplyr::select(`Gas Day`, `Data Item`, Value, `Quality Indicator`)
 ```
 
 ```{r}
@@ -52,61 +53,64 @@ holidays <-
 
 ```{r}
 quality_colour <- c("grey", "A" = "red", "L" = "orange")
+
+plot_item_vs_time <- function(item) {
+  gas_demand %>%
+    dplyr::filter(`Data Item` == item) %>%
+    ggplot2::ggplot(mapping = ggplot2::aes(
+      x = `Gas Day`,
+      y = Value,
+      colour = `Quality Indicator`)) +
+    ggplot2::scale_colour_manual(values = quality_colour) +
+    ggplot2::geom_point(size = 1) +
+    ggplot2::labs(
+      y = item,
+      title = paste(item, "vs Gas Day"))
+}
+
+plot_item_vs_quality <- function(item) {
+  gas_demand %>%
+    dplyr::filter(`Data Item` == item) %>%
+    ggplot2::ggplot(mapping = ggplot2::aes(
+      x = `Quality Indicator`,
+      y = Value,
+      colour = `Quality Indicator`)) +
+    ggplot2::scale_colour_manual(values = quality_colour) +
+    ggplot2::geom_boxplot(
+      outliers = FALSE,
+      varwidth = TRUE) +
+    ggplot2::geom_violin(
+      mapping = ggplot2::aes(
+        fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+      data = . %>% dplyr::filter(`Quality Indicator` == ""),
+      show.legend = FALSE) +
+    ggplot2::geom_dotplot(
+      mapping = ggplot2::aes(
+        fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+      data = . %>% dplyr::filter(`Quality Indicator` != ""),
+      binaxis = "y",
+      stackdir = "center",
+      dotsize = 0.62) +
+    ggplot2::labs(
+      y = item,
+      title = paste(item, "vs Quality Indicator"))
+}
 ```
 
 ```{r}
-# summaries of Gas Demand
-
-gas_demand %>%
-  dplyr::filter(`Data Item` == "Gas Demand") %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Gas Day`,
-    y = Value,
-    colour = `Quality Indicator`)) +
-  ggplot2::scale_colour_manual(values = quality_colour) +
-  ggplot2::geom_point(size = 1) +
-  ggplot2::labs(
-    y = "Gas Demand",
-    title = "Gas Demand vs Gas Day")
-
-gas_demand %>%
-  dplyr::filter(`Data Item` == "Gas Demand") %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Quality Indicator`,
-    y = Value,
-    colour = `Quality Indicator`)) +
-  ggplot2::scale_colour_manual(values = quality_colour) +
-  ggplot2::geom_boxplot(
-    outliers = FALSE,
-    varwidth = TRUE) +
-  ggplot2::geom_violin(
-    mapping = ggplot2::aes(
-      fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
-    data = . %>% dplyr::filter(`Quality Indicator` == ""),
-    show.legend = FALSE) +
-  ggplot2::geom_dotplot(
-    mapping = ggplot2::aes(
-      fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
-    data = . %>% dplyr::filter(`Quality Indicator` != ""),
-    binaxis = "y",
-    stackdir = "center",
-    dotsize = 0.62)
+plot_item_vs_time("Gas Demand")
 ```
 
 ```{r}
-# summaries of Composite Weather Variable
+plot_item_vs_quality("Gas Demand")
+```
 
-gas_demand %>%
-  dplyr::filter(`Data Item` == "Composite Weather Variable") %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Gas Day`,
-    y = Value,
-    colour = `Quality Indicator`)) +
-  ggplot2::scale_colour_manual(values = quality_colour) +
-  ggplot2::geom_point(size = 1) +
-  ggplot2::labs(
-    y = "Composite Weather Variable",
-    title = "Composite Weather Variable vs Gas Day")
+```{r}
+plot_item_vs_time("Composite Weather Variable")
+```
+
+```{r}
+plot_item_vs_quality("Composite Weather Variable")
 ```
 
 ```{r}
@@ -143,7 +147,7 @@ gas_demand_wide %>%
     x = `Composite Weather Variable`,
     y = `Gas Demand`)) +
   ggplot2::geom_point() +
-  ggplot2::labs(title = "Demand Actual, LDZ (SC), D+6")
+  ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 
 ```{r}
@@ -153,7 +157,7 @@ gas_demand_wide %>%
     y = `Gas Demand`,
     colour = Holiday)) +
   ggplot2::geom_point() +
-  ggplot2::labs(title = "Demand Actual, LDZ (SC), D+6")
+  ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 
 

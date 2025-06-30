@@ -6,17 +6,17 @@ editor_options:
 ---
 
 ```{r}
-sys_locale <- "en_GB.utf8"
-Sys.setlocale(locale = sys_locale)
-```
-
-```{r}
 # load packages
 library(tidyverse)
 library(jsonlite)
 ```
 
 ```{r}
+# set locale
+sys_locale <- "en_GB.utf8"
+Sys.setlocale(locale = sys_locale)
+weekends <- lubridate::make_date(day = 3:4) %>% lubridate::wday(label = TRUE)
+
 # set global theme
 ggplot2::theme_set(ggplot2::theme_minimal(base_size = 12))
 ```
@@ -51,31 +51,58 @@ holidays <-
 ```
 
 ```{r}
+quality_colour <- c("grey", "A" = "red", "L" = "orange")
+```
+
+```{r}
 # summaries of Gas Demand
+
 gas_demand %>%
   dplyr::filter(`Data Item` == "Gas Demand") %>%
   ggplot2::ggplot(mapping = ggplot2::aes(
     x = `Gas Day`,
     y = Value,
     colour = `Quality Indicator`)) +
-  ggplot2::scale_colour_manual(
-    values = c("black", "A" = "red", "L" = "orange")) +
+  ggplot2::scale_colour_manual(values = quality_colour) +
   ggplot2::geom_point(size = 1) +
   ggplot2::labs(
     y = "Gas Demand",
     title = "Gas Demand vs Gas Day")
+
+gas_demand %>%
+  dplyr::filter(`Data Item` == "Gas Demand") %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Quality Indicator`,
+    y = Value,
+    colour = `Quality Indicator`)) +
+  ggplot2::scale_colour_manual(values = quality_colour) +
+  ggplot2::geom_boxplot(
+    outliers = FALSE,
+    varwidth = TRUE) +
+  ggplot2::geom_violin(
+    mapping = ggplot2::aes(
+      fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+    data = . %>% dplyr::filter(`Quality Indicator` == ""),
+    show.legend = FALSE) +
+  ggplot2::geom_dotplot(
+    mapping = ggplot2::aes(
+      fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+    data = . %>% dplyr::filter(`Quality Indicator` != ""),
+    binaxis = "y",
+    stackdir = "center",
+    dotsize = 0.62)
 ```
 
 ```{r}
 # summaries of Composite Weather Variable
+
 gas_demand %>%
   dplyr::filter(`Data Item` == "Composite Weather Variable") %>%
   ggplot2::ggplot(mapping = ggplot2::aes(
     x = `Gas Day`,
     y = Value,
     colour = `Quality Indicator`)) +
-  ggplot2::scale_colour_manual(
-    values = c("black", "A" = "red", "L" = "orange")) +
+  ggplot2::scale_colour_manual(values = quality_colour) +
   ggplot2::geom_point(size = 1) +
   ggplot2::labs(
     y = "Composite Weather Variable",
@@ -105,7 +132,9 @@ gas_demand_wide <-
     by = dplyr::join_by(`Gas Day` == Holiday),
     keep = TRUE,
     relationship = "one-to-one") %>%
-  dplyr::mutate(dplyr::across(Holiday, \(.) !is.na(.)))
+  dplyr::mutate(dplyr::across(
+    Holiday,
+    \(.) !is.na(.) | `Day of the Week` %in% weekends))
 ```
 
 ```{r}
@@ -113,6 +142,16 @@ gas_demand_wide %>%
   ggplot2::ggplot(mapping = ggplot2::aes(
     x = `Composite Weather Variable`,
     y = `Gas Demand`)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(title = "Demand Actual, LDZ (SC), D+6")
+```
+
+```{r}
+gas_demand_wide %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Composite Weather Variable`,
+    y = `Gas Demand`,
+    colour = Holiday)) +
   ggplot2::geom_point() +
   ggplot2::labs(title = "Demand Actual, LDZ (SC), D+6")
 ```

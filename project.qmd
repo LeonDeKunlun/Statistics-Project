@@ -120,7 +120,8 @@ gas_demand_wide <-
   dplyr::mutate(dplyr::across(
     Value,
     \(.) dplyr::if_else(
-      `Data Item` == "Gas Demand" & `Quality Indicator` != "",
+      `Data Item` == "Gas Demand"
+      & (`Quality Indicator` == "A" | Value == 5.4),
       NA, .))) %>%
   # transform the data frame
   tidyr::pivot_wider(
@@ -144,9 +145,28 @@ gas_demand_wide <-
 ```{r}
 gas_demand_wide %>%
   ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Gas Day`,
+    y = `Gas Demand`)) +
+  ggplot2::geom_line() +
+  ggplot2::coord_cartesian(ylim = c(0, NA)) +
+  ggplot2::labs(title = "Gas Demand vs Gas Day")
+```
+
+```{r}
+gas_demand_wide %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
+    x = `Gas Day`,
+    y = `Composite Weather Variable`)) +
+  ggplot2::geom_line() +
+  ggplot2::labs(title = "Composite Weather Variable vs Gas Day")
+```
+
+```{r}
+gas_demand_wide %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(
     x = `Composite Weather Variable`,
     y = `Gas Demand`)) +
-  ggplot2::geom_point() +
+  ggplot2::geom_point(size = 1) +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 
@@ -156,7 +176,7 @@ gas_demand_wide %>%
     x = `Composite Weather Variable`,
     y = `Gas Demand`,
     colour = Holiday)) +
-  ggplot2::geom_point() +
+  ggplot2::geom_point(size = 1) +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 

@@ -29,11 +29,8 @@ gas_demand <-
   utils::read.csv(
     file = "Scotland_Gas_Demand_and_CWV_01-01-2021_31-12-2024.csv",
     check.names = FALSE) %>%
-  dplyr::rename(`Gas Day` = `Applicable For`) %>%
   dplyr::mutate(
-    dplyr::across(
-      `Gas Day`,
-      . %>% as.Date(format = "%d/%m/%Y")),
+    `Gas Day` = `Applicable For` %>% as.Date(format = "%d/%m/%Y"),
     dplyr::across(
       `Data Item`,
       . %>% dplyr::case_match(
@@ -48,9 +45,11 @@ gas_demand <-
 holidays <-
   jsonlite::fromJSON(
     txt = "https://www.gov.uk/bank-holidays.json"
-  )$scotland$events$date %>%
-  as.Date(format = "%Y-%m-%d") %>%
-  as.data.frame.vector(nm = "Holiday")
+  )$scotland$events %>%
+  dplyr::mutate(
+    Date = date %>% as.Date(format = "%Y-%m-%d"),
+    Holiday = title %>% stringr::str_remove(pattern = " \\(.*\\)"),
+    .keep = "none")
 ```
 
 ```{r}
@@ -119,12 +118,12 @@ plot_item_vs_quality("Composite Weather Variable")
 gas_demand_wide <-
   gas_demand %>%
   # remove outliers
-  dplyr::mutate(dplyr::across(
-    Value,
-    \(.) dplyr::if_else(
-      `Data Item` == "Gas Demand"
-      & (`Quality Indicator` == "A" | Value == 5.4),
-      NA, .))) %>%
+  dplyr::mutate(
+    Value =
+      dplyr::case_when(
+        `Data Item` == "Gas Demand" & `Quality Indicator` == "A" ~ NA,
+        `Data Item` == "Gas Demand" & Value == 5.4 ~ NA,
+        .default = Value)) %>%
   # transform the data frame
   tidyr::pivot_wider(
     id_cols = `Gas Day`,
@@ -138,12 +137,14 @@ gas_demand_wide <-
   # add public holiday data
   dplyr::left_join(
     holidays,
-    by = dplyr::join_by(`Gas Day` == Holiday),
-    keep = TRUE,
+    by = dplyr::join_by(`Gas Day` == Date),
     relationship = "one-to-one") %>%
-  dplyr::mutate(dplyr::across(
-    Holiday,
-    \(.) !is.na(.) | `Day of the Week` %in% weekends))
+  dplyr::mutate(
+    Holiday =
+      dplyr::case_when(
+        !is.na(Holiday) ~ "bank holiday",
+        `Day of the Week` %in% weekends ~ "weekend",
+        .default = "none"))
 ```
 
 ```{r}

@@ -19,8 +19,10 @@ weekends <- lubridate::make_date(day = 3:4) %>% lubridate::wday(label = TRUE)
 
 # set global theme
 ggplot2::theme_set(
-  ggplot2::theme_minimal(base_size = 12)
-  + ggplot2::theme(axis.line = ggplot2::theme_classic()$axis.line))
+  new =
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      axis.line = ggplot2::theme_classic()$axis.line))
 ```
 
 ```{r}
@@ -58,10 +60,11 @@ quality_colour <- c("grey", "A" = "red", "L" = "orange")
 plot_item_vs_time <- function(item) {
   gas_demand %>%
     dplyr::filter(`Data Item` == item) %>%
-    ggplot2::ggplot(mapping = ggplot2::aes(
-      x = `Gas Day`,
-      y = Value,
-      colour = `Quality Indicator`)) +
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(
+        x = `Gas Day`,
+        y = Value,
+        colour = `Quality Indicator`)) +
     ggplot2::scale_colour_manual(values = quality_colour) +
     ggplot2::geom_point(size = 1) +
     ggplot2::labs(
@@ -72,10 +75,11 @@ plot_item_vs_time <- function(item) {
 plot_item_vs_quality <- function(item) {
   gas_demand %>%
     dplyr::filter(`Data Item` == item) %>%
-    ggplot2::ggplot(mapping = ggplot2::aes(
-      x = `Quality Indicator`,
-      y = Value,
-      colour = `Quality Indicator`)) +
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(
+        x = `Quality Indicator`,
+        y = Value,
+        colour = `Quality Indicator`)) +
     ggplot2::scale_colour_manual(values = quality_colour) +
     ggplot2::geom_boxplot(
       outliers = FALSE,
@@ -149,9 +153,10 @@ gas_demand_wide <-
 
 ```{r}
 gas_demand_wide %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Gas Day`,
-    y = `Gas Demand`)) +
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = `Gas Day`,
+      y = `Gas Demand`)) +
   ggplot2::geom_line() +
   ggplot2::coord_cartesian(ylim = c(0, NA)) +
   ggplot2::labs(title = "Gas Demand vs Gas Day")
@@ -159,28 +164,31 @@ gas_demand_wide %>%
 
 ```{r}
 gas_demand_wide %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Gas Day`,
-    y = `Composite Weather Variable`)) +
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = `Gas Day`,
+      y = `Composite Weather Variable`)) +
   ggplot2::geom_line() +
   ggplot2::labs(title = "Composite Weather Variable vs Gas Day")
 ```
 
 ```{r}
 gas_demand_wide %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Composite Weather Variable`,
-    y = `Gas Demand`)) +
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = `Composite Weather Variable`,
+      y = `Gas Demand`)) +
   ggplot2::geom_point(size = 1) +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 
 ```{r}
 gas_demand_wide %>%
-  ggplot2::ggplot(mapping = ggplot2::aes(
-    x = `Composite Weather Variable`,
-    y = `Gas Demand`,
-    colour = Holiday)) +
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = `Composite Weather Variable`,
+      y = `Gas Demand`,
+      colour = Holiday)) +
   ggplot2::geom_point(size = 1) +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```

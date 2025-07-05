@@ -18,7 +18,9 @@ Sys.setlocale(locale = sys_locale)
 weekends <- lubridate::make_date(day = 3:4) %>% lubridate::wday(label = TRUE)
 
 # set global theme
-ggplot2::theme_set(ggplot2::theme_minimal(base_size = 12))
+ggplot2::theme_set(
+  ggplot2::theme_minimal(base_size = 12)
+  + ggplot2::theme(axis.line = ggplot2::theme_classic()$axis.line))
 ```
 
 ```{r}
@@ -90,7 +92,7 @@ plot_item_vs_quality <- function(item) {
       data = . %>% dplyr::filter(`Quality Indicator` != ""),
       binaxis = "y",
       stackdir = "center",
-      dotsize = 0.62) +
+      dotsize = 0.5) +
     ggplot2::labs(
       y = item,
       title = paste(item, "vs Quality Indicator"))
@@ -128,6 +130,8 @@ gas_demand_wide <-
     id_cols = `Gas Day`,
     names_from = `Data Item`,
     values_from = Value) %>%
+  # order the data by Date
+  dplyr::arrange(`Gas Day`) %>%
   # add day of the week
   dplyr::mutate(
     `Day of the Week` = `Gas Day` %>% lubridate::wday(label = TRUE)) %>%

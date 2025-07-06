@@ -17,12 +17,23 @@ sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
 weekends <- lubridate::make_date(day = 3:4) %>% lubridate::wday(label = TRUE)
 
-# set global theme
+# set plot theme
+size_param <- ggplot2::.stroke / ggplot2::.pt
 ggplot2::theme_set(
   new =
-    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme_minimal(
+      base_size = 12,
+      base_line_size = 0.5 * size_param,
+      base_rect_size = 0.5 * size_param) +
     ggplot2::theme(
       axis.line = ggplot2::theme_classic()$axis.line))
+list(
+  "point" = list(size = 1 * size_param, stroke = 0.5),
+  "line" = list(linewidth = 0.5 * size_param),
+  "text" = list(size = 12 / ggplot2::.pt, lineheight = 1),
+  "boxplot" = list(linewidth = 0.5 * size_param),
+  "violin" = list(linewidth = 0.5 * size_param)
+) %>% purrr::iwalk(\(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
 
 ```{r}
@@ -66,7 +77,7 @@ plot_item_vs_time <- function(item) {
         y = Value,
         colour = `Quality Indicator`)) +
     ggplot2::scale_colour_manual(values = quality_colour) +
-    ggplot2::geom_point(size = 1) +
+    ggplot2::geom_point(size = 0.75 * size_param) +
     ggplot2::labs(
       y = item,
       title = paste(item, "vs Gas Day"))
@@ -178,7 +189,7 @@ gas_demand_wide %>%
     mapping = ggplot2::aes(
       x = `Composite Weather Variable`,
       y = `Gas Demand`)) +
-  ggplot2::geom_point(size = 1) +
+  ggplot2::geom_point() +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 
@@ -189,7 +200,7 @@ gas_demand_wide %>%
       x = `Composite Weather Variable`,
       y = `Gas Demand`,
       colour = Holiday)) +
-  ggplot2::geom_point(size = 1) +
+  ggplot2::geom_point() +
   ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
 ```
 

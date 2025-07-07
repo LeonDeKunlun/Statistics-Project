@@ -32,7 +32,8 @@ list(
   "line" = list(linewidth = 0.5 * size_param),
   "text" = list(size = 12 / ggplot2::.pt, lineheight = 1),
   "boxplot" = list(linewidth = 0.5 * size_param),
-  "violin" = list(linewidth = 0.5 * size_param)
+  "violin" = list(linewidth = 0.5 * size_param),
+  "smooth" = list(linewidth = 0.75 * size_param)
 ) %>% purrr::iwalk(\(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
 
@@ -163,13 +164,33 @@ gas_demand_wide <-
 ```
 
 ```{r}
+weekday_colour = c()
+names(weekday_colour)
+
+create_variable_plot <- function(x, y) {
+  gas_demand_wide %>%
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(x = {{ x }}, y = {{ y }})) +
+    ggplot2::labs(title = rlang::englue("{{ y }} vs {{ x }}"))
+}
+```
+
+```{r}
+create_variable_plot(`Gas Day`, `Gas Demand`) +
+  ggplot2::geom_line()
+```
+
+```{r}
 gas_demand_wide %>%
   ggplot2::ggplot(
     mapping = ggplot2::aes(
       x = `Gas Day`,
-      y = `Gas Demand`)) +
-  ggplot2::geom_line() +
-  ggplot2::coord_cartesian(ylim = c(0, NA)) +
+      y = `Gas Demand`,
+      colour = `Day of the Week`)) +
+  ggplot2::geom_point(stroke = 0) +
+  ggplot2::geom_smooth(
+    se = FALSE,
+    span = 0.3) +
   ggplot2::labs(title = "Gas Demand vs Gas Day")
 ```
 

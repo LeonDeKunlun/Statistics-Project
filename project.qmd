@@ -1,17 +1,33 @@
 ---
-title: "Untitled"
-format: pdf
+title: Short-term Gas Demand Foreacsting
+author:
+  name: ""
+format:
+  pdf:
+    output-ext: pdf
+toc: true
+toc-title: Contents
+number-sections: true
+fontsize: 12pt
+linestretch: 1
+execute:
+  echo: false
+  warning: false
+fig-align: center
+output-file: Project68
 editor_options:
   chunk_output_type: console
 ---
 
-```{r}
+\newpage
+
+```{r, results='hide'}
 # load packages
 library(tidyverse)
 library(jsonlite)
 ```
 
-```{r}
+```{r, results='hide'}
 # set locale
 sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
@@ -39,6 +55,16 @@ purrr::iwalk(
     "smooth" = list(linewidth = 0.75 * size_param)),
   \(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
+
+# Introduction
+
+Natural gas is an important resource across the world.
+
+# Methodologies
+
+# Data Analysis
+
+# Conclusion
 
 ```{r}
 # read the data
@@ -190,7 +216,8 @@ create_plot(`Gas Day`, `Gas Demand`) +
 
 ```{r}
 create_plot(`Gas Day`, `Gas Demand`) +
-  ggplot2::aes(colour = `Day of the Week`) +
+  ggplot2::aes(
+    colour = `Day of the Week`) +
   ggplot2::geom_point(stroke = 0) +
   ggplot2::geom_smooth(
     se = FALSE,

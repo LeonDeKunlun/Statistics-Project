@@ -15,7 +15,9 @@ library(jsonlite)
 # set locale
 sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
-weekends <- lubridate::make_date(day = 3:4) %>% lubridate::wday(label = TRUE)
+weekends <-
+  lubridate::make_date(day = 3:4) %>%
+  lubridate::wday(label = TRUE)
 
 # set plot theme
 size_param <- ggplot2::.stroke / ggplot2::.pt
@@ -27,14 +29,15 @@ ggplot2::theme_set(
       base_rect_size = 0.5 * size_param) +
     ggplot2::theme(
       axis.line = ggplot2::theme_classic()$axis.line))
-list(
-  "point" = list(size = 1 * size_param, stroke = 0.5),
-  "line" = list(linewidth = 0.5 * size_param),
-  "text" = list(size = 12 / ggplot2::.pt, lineheight = 1),
-  "boxplot" = list(linewidth = 0.5 * size_param),
-  "violin" = list(linewidth = 0.5 * size_param),
-  "smooth" = list(linewidth = 0.75 * size_param)
-) %>% purrr::iwalk(\(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
+purrr::iwalk(
+  list(
+    "point" = list(size = 1 * size_param, stroke = 0.5),
+    "line" = list(linewidth = 0.5 * size_param),
+    "text" = list(size = 12 / ggplot2::.pt, lineheight = 1),
+    "boxplot" = list(linewidth = 0.5 * size_param),
+    "violin" = list(linewidth = 0.5 * size_param),
+    "smooth" = list(linewidth = 0.75 * size_param)),
+  \(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
 
 ```{r}
@@ -80,8 +83,8 @@ plot_item_vs_time <- function(item) {
     ggplot2::scale_colour_manual(values = quality_colour) +
     ggplot2::geom_point(size = 0.75 * size_param) +
     ggplot2::labs(
-      y = item,
-      title = paste(item, "vs Gas Day"))
+      title = paste(item, "vs Gas Day"),
+      y = item)
 }
 
 plot_item_vs_quality <- function(item) {
@@ -98,19 +101,21 @@ plot_item_vs_quality <- function(item) {
       varwidth = TRUE) +
     ggplot2::geom_violin(
       mapping = ggplot2::aes(
-        fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+        fill = ggplot2::after_scale(colour)),
       data = . %>% dplyr::filter(`Quality Indicator` == ""),
+      alpha = 0.38,
       show.legend = FALSE) +
     ggplot2::geom_dotplot(
       mapping = ggplot2::aes(
-        fill = ggplot2::after_scale(scales::alpha(colour, 0.38))),
+        fill = ggplot2::after_scale(colour)),
       data = . %>% dplyr::filter(`Quality Indicator` != ""),
+      alpha = 0.38,
       binaxis = "y",
       stackdir = "center",
       dotsize = 0.5) +
     ggplot2::labs(
-      y = item,
-      title = paste(item, "vs Quality Indicator"))
+      title = paste(item, "vs Quality Indicator"),
+      y = item)
 }
 ```
 
@@ -167,62 +172,46 @@ gas_demand_wide <-
 weekday_colour = c()
 names(weekday_colour)
 
-create_variable_plot <- function(x, y) {
+create_plot <- function(x, y) {
   gas_demand_wide %>%
     ggplot2::ggplot(
-      mapping = ggplot2::aes(x = {{ x }}, y = {{ y }})) +
-    ggplot2::labs(title = rlang::englue("{{ y }} vs {{ x }}"))
+      mapping = ggplot2::aes(
+        x = {{ x }},
+        y = {{ y }})) +
+    ggplot2::labs(
+      title = rlang::englue("{{ y }} vs {{ x }}"))
 }
 ```
 
 ```{r}
-create_variable_plot(`Gas Day`, `Gas Demand`) +
+create_plot(`Gas Day`, `Gas Demand`) +
   ggplot2::geom_line()
 ```
 
 ```{r}
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = `Gas Day`,
-      y = `Gas Demand`,
-      colour = `Day of the Week`)) +
+create_plot(`Gas Day`, `Gas Demand`) +
+  ggplot2::aes(colour = `Day of the Week`) +
   ggplot2::geom_point(stroke = 0) +
   ggplot2::geom_smooth(
     se = FALSE,
-    span = 0.3) +
-  ggplot2::labs(title = "Gas Demand vs Gas Day")
+    span = 0.3)
 ```
 
 ```{r}
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = `Gas Day`,
-      y = `Composite Weather Variable`)) +
-  ggplot2::geom_line() +
-  ggplot2::labs(title = "Composite Weather Variable vs Gas Day")
+create_plot(`Gas Day`, `Composite Weather Variable`) +
+  ggplot2::geom_line()
 ```
 
 ```{r}
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = `Composite Weather Variable`,
-      y = `Gas Demand`)) +
-  ggplot2::geom_point() +
-  ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
+create_plot(`Composite Weather Variable`, `Gas Demand`) +
+  ggplot2::geom_point()
 ```
 
 ```{r}
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = `Composite Weather Variable`,
-      y = `Gas Demand`,
-      colour = Holiday)) +
-  ggplot2::geom_point() +
-  ggplot2::labs(title = "Gas Demand vs Composite Weather Variable")
+create_plot(`Composite Weather Variable`, `Gas Demand`) +
+  ggplot2::aes(
+    colour = Holiday) +
+  ggplot2::geom_point()
 ```
 
 

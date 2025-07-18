@@ -10,16 +10,17 @@ toc-title: Contents
 number-sections: true
 fontsize: 12pt
 linestretch: 1
+colorlinks: false
 execute:
   echo: false
   warning: false
 fig-align: center
-output-file: Project68
+bibliography: references.bib
+csl: elsevier-harvard.csl
+output-file: Project68_2
 editor_options:
   chunk_output_type: console
 ---
-
-\newpage
 
 ```{r, results='hide'}
 # load packages
@@ -57,16 +58,6 @@ purrr::iwalk(
     "smooth" = list(linewidth = 0.75 * size_param)),
   \(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
-
-# Introduction
-
-Natural gas is an important resource across the world.
-
-# Methodologies
-
-# Data Analysis
-
-# Conclusion
 
 ```{r}
 # read the data
@@ -118,7 +109,7 @@ plot_item_vs_time <- function(item) {
     ggplot2::scale_colour_manual(values = quality_colour) +
     ggplot2::geom_point(size = 0.75 * size_param) +
     ggplot2::labs(
-      title = paste(item, "vs Gas Day"),
+      # title = paste(item, "vs Gas Day"),
       y = item)
 }
 
@@ -149,25 +140,9 @@ plot_item_vs_quality <- function(item) {
       stackdir = "center",
       dotsize = 0.5) +
     ggplot2::labs(
-      title = paste(item, "vs Quality Indicator"),
+      # title = paste(item, "vs Quality Indicator"),
       y = item)
 }
-```
-
-```{r}
-plot_item_vs_time("Gas Demand")
-```
-
-```{r}
-plot_item_vs_quality("Gas Demand")
-```
-
-```{r}
-plot_item_vs_time("Composite Weather Variable")
-```
-
-```{r}
-plot_item_vs_quality("Composite Weather Variable")
 ```
 
 ```{r}
@@ -233,12 +208,51 @@ create_plot <- function(data = gas_demand_wide, x, y) {
 }
 ```
 
-```{r}
-create_plot(x = `Gas Day`, y = `Gas Demand`) +
-  ggplot2::geom_line()
-```
+\newpage
+
+# Introduction
+
+Natural gas is an important energy resource,
+which is widely used in industry and electricity generation [@iea2025review].
+A sufficient and economic supply of natural gas is important,
+and requires accurate forecasts of natural gas demand.
+
+This study specifically focuses on forecasting natural gas demand in Scotland.
+
+# Data and Exploratory Analysis
+
+Multiple factors that can influence natural gas demand were considered
+including temperature, wind speed, seasonality, and special events.
+
+The gas demand and weather data from 2021 to 2024 were taken from
+[National Gas](https://data.nationalgas.com)
+with data quality indicators.
+The bank holiday data were taken from UK government
+[API](https://www.api.gov.uk/gds/bank-holidays).
+
+The gas demand data measures actual natural gas demand in mega standard cubed metre (MSm$^3$) for Scotland and for the given date.
+@fig-demand shows the annual seasonality and several outliers to remove.
 
 ```{r}
+#| label: fig-demand
+#| fig-cap: Plots of Gas Demand
+#| fig-subcap:
+#| - ""
+#| - ""
+#| layout-ncol: 2
+
+plot_item_vs_time("Gas Demand")
+
+plot_item_vs_quality("Gas Demand")
+```
+
+After removing the outliers, a more detailed plot (@fig-demand-date) shows the differences in gas demand levels between day of the week.
+The gas demand level in weekends are lower than the gas demand level in weekdays.
+
+```{r}
+#| label: fig-demand-date
+#| fig-cap: Gas Demand vs Date by Day of the Week
+
 create_plot(x = `Gas Day`, y = `Gas Demand`) +
   ggplot2::aes(
     colour = `Day of the Week`) +
@@ -247,6 +261,34 @@ create_plot(x = `Gas Day`, y = `Gas Demand`) +
     method = "loess",
     se = FALSE,
     span = 0.25)
+```
+
+The composite weather variable (CWV) is calculated from temperature and wind speed.
+@fig-cwv shows no obvious outliers.
+
+```{r}
+#| label: fig-cwv
+#| fig-cap: Plots of Composite Weather Variable
+#| fig-subcap:
+#| - ""
+#| - ""
+#| layout-ncol: 2
+
+plot_item_vs_time("Composite Weather Variable")
+
+plot_item_vs_quality("Composite Weather Variable")
+```
+
+\newpage
+
+# Reference {.unnumbered}
+
+::: {#refs}
+:::
+
+```{r}
+create_plot(x = `Gas Day`, y = `Gas Demand`) +
+  ggplot2::geom_line()
 ```
 
 ```{r}

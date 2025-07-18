@@ -24,13 +24,15 @@ editor_options:
 ```{r, results='hide'}
 # load packages
 library(tidyverse)
-library(jsonlite)
+library(gamlss)
 ```
 
 ```{r, results='hide'}
 # set locale
 sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
+
+options(lubridate.week.start = 1)
 weekends <-
   lubridate::make_date(day = 3:4) %>%
   lubridate::wday(label = TRUE)
@@ -74,12 +76,19 @@ gas_demand <-
     check.names = FALSE) %>%
   dplyr::mutate(
     `Gas Day` = `Applicable For` %>% as.Date(format = "%d/%m/%Y"),
-    dplyr::across(
-      `Data Item`,
-      . %>% dplyr::case_match(
+    `Data Item` =
+      `Data Item` %>%
+      dplyr::case_match(
         "Demand Actual, LDZ (SC), D+6" ~ "Gas Demand",
         "Composite Weather Variable, Actual, LDZ(SC), D+1" ~
-          "Composite Weather Variable"))) %>%
+          "Composite Weather Variable"),
+    `Quality Indicator` =
+      `Quality Indicator` %>%
+      dplyr::case_match(
+        "A" ~ "Amended",
+        "L" ~ "Late",
+        .default = `Quality Indicator`) %>%
+      factor(levels = c("", "Late", "Amended"))) %>%
   dplyr::select(`Gas Day`, `Data Item`, Value, `Quality Indicator`)
 ```
 
@@ -96,7 +105,7 @@ holidays <-
 ```
 
 ```{r}
-quality_colour <- c("grey", "A" = "red", "L" = "orange")
+quality_colour <- c("grey", "Amended" = "red", "Late" = "orange")
 
 plot_item_vs_time <- function(item) {
   gas_demand %>%
@@ -168,7 +177,7 @@ gas_demand_wide <-
   dplyr::mutate(
     Value =
       dplyr::case_when(
-        `Data Item` == "Gas Demand" & `Quality Indicator` == "A" ~ NA,
+        `Data Item` == "Gas Demand" & `Quality Indicator` == "Amended" ~ NA,
         `Data Item` == "Gas Demand" & Value == 5.4 ~ NA,
         .default = Value)) %>%
   # transform the data frame
@@ -189,17 +198,32 @@ gas_demand_wide <-
   dplyr::mutate(
     Holiday =
       dplyr::case_when(
-        !is.na(Holiday) ~ "bank holiday",
-        `Day of the Week` %in% weekends ~ "weekend",
-        .default = "none"))
+        !is.na(Holiday) ~ "Holiday",
+        `Day of the Week` %in% weekends ~ "Holiday",
+        .default = "None") %>%
+      factor(levels = c("None", "Holiday")))
 ```
+
+
+```{r}
+
+```
+
+
+```{r}
+gas_demand_wide <-
+  gas_demand_wide %>%
+  dplyr::filter(`Gas Day` < lubridate::make_date(2024, 1, 1)) %>%
+  stats::na.omit()
+```
+
 
 ```{r}
 weekday_colour = c()
-names(weekday_colour)
+names(weekday_colour) <- c()
 
-create_plot <- function(x, y) {
-  gas_demand_wide %>%
+create_plot <- function(data = gas_demand_wide, x, y) {
+  data %>%
     ggplot2::ggplot(
       mapping = ggplot2::aes(
         x = {{ x }},
@@ -210,36 +234,155 @@ create_plot <- function(x, y) {
 ```
 
 ```{r}
-create_plot(`Gas Day`, `Gas Demand`) +
+create_plot(x = `Gas Day`, y = `Gas Demand`) +
   ggplot2::geom_line()
 ```
 
 ```{r}
-create_plot(`Gas Day`, `Gas Demand`) +
+create_plot(x = `Gas Day`, y = `Gas Demand`) +
   ggplot2::aes(
     colour = `Day of the Week`) +
   ggplot2::geom_point(stroke = 0) +
   ggplot2::geom_smooth(
+    method = "loess",
     se = FALSE,
-    span = 0.3)
+    span = 0.25)
 ```
 
 ```{r}
-create_plot(`Gas Day`, `Composite Weather Variable`) +
+create_plot(x = `Gas Day`, y = `Composite Weather Variable`) +
   ggplot2::geom_line()
 ```
 
 ```{r}
-create_plot(`Composite Weather Variable`, `Gas Demand`) +
+create_plot(x = `Composite Weather Variable`, y = `Gas Demand`) +
   ggplot2::geom_point()
 ```
 
 ```{r}
-create_plot(`Composite Weather Variable`, `Gas Demand`) +
+create_plot(x = `Composite Weather Variable`, y = `Gas Demand`) +
   ggplot2::aes(
     colour = Holiday) +
   ggplot2::geom_point()
 ```
+
+```{r}
+merge_residuals <- function(model) {
+  gas_demand_wide %>%
+    stats::na.omit() %>%
+    dplyr::mutate(
+      Residual = model %>% stats::residuals()) %>%
+    dplyr::select(`Gas Day`, Residual) %>%
+    dplyr::right_join(
+      gas_demand_wide,
+      by = dplyr::join_by(`Gas Day`),
+      relationship = "one-to-one")
+}
+```
+
+```{r}
+model <-
+  stats::lm(
+    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
+    data = gas_demand_wide)
+
+summary(model)
+
+merge_residuals(model) %>%
+  create_plot(x = `Gas Day`, y = Residual) +
+  geom_line()
+```
+
+```{r}
+model <-
+  stats::lm(
+    formula =
+      `Gas Demand` ~
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)),
+    data = gas_demand_wide)
+
+summary(model)
+
+merge_residuals(model) %>%
+  create_plot(x = `Gas Day`, y = Residual) +
+  geom_line()
+```
+
+```{r}
+model <-
+  stats::lm(
+    formula =
+      `Gas Demand` ~
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
+    data = gas_demand_wide)
+
+summary(model)
+
+merge_residuals(model) %>%
+  create_plot(x = `Gas Day`, y = Residual) +
+  geom_line()
+```
+
+```{r}
+model <-
+  stats::lm(
+    formula =
+      `Gas Demand` ~
+      `Composite Weather Variable` * Holiday +
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
+    data = gas_demand_wide)
+```
+
+```{r}
+model <-
+  gamlss::gamlss(
+    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
+    sigma.formula =`Gas Demand` ~ `Composite Weather Variable` * Holiday,
+    data = gas_demand_wide %>% stats::na.omit())
+```
+
+```{r}
+model <-
+  gamlss::gamlss(
+    formula =
+      `Gas Demand` ~
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
+    sigma.formula =
+      `Gas Demand` ~
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)) ,
+    data = gas_demand_wide %>% stats::na.omit())
+
+summary(model)
+
+merge_residuals(model) %>%
+  create_plot(x = `Gas Day`, y = Residual) +
+  geom_line()
+```
+
+```{r}
+model <-
+  gamlss::gamlss(
+    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
+    sigma.formula =
+      `Gas Demand` ~
+      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
+      I(cos(2 * pi * unclass(`Gas Day`) / 365)),
+    data = gas_demand_wide %>% stats::na.omit())
+```
+
+```{r}
+model.arma <- stats::arima(stats::residuals(model), order = c(1, 1, 1))
+
+stats::acf(stats::residuals(model.arma))
+stats::pacf(stats::residuals(model.arma))
+```
+
+
 
 
 

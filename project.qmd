@@ -9,6 +9,7 @@ format:
   pdf:
     output-ext: pdf
 toc: true
+toc-depth: 1
 toc-title: Contents
 number-sections: true
 fontsize: 12pt
@@ -18,8 +19,13 @@ execute:
   echo: false
   warning: false
 fig-align: center
+fig-pos: H
+fig-width: 3.5433
+fig-height: 2.1899
+fig-dpi: 360
+df-print: kable
 bibliography: references.bib
-csl: elsevier-harvard.csl
+csl: harvard-university-of-leeds.csl
 output-file: Project68_2
 editor_options:
   chunk_output_type: console
@@ -28,6 +34,8 @@ editor_options:
 ```{r, results='hide'}
 # load packages
 library(tidyverse)
+library(magrittr)
+library(cowplot)
 library(mgcv)
 ```
 
@@ -36,7 +44,8 @@ library(mgcv)
 sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
 
-options(lubridate.week.start = 1)
+options(
+  lubridate.week.start = 1)
 weekends <-
   lubridate::make_date(day = 3:4) %>%
   lubridate::wday(label = TRUE)
@@ -53,12 +62,11 @@ ggplot2::theme_set(
       axis.line = ggplot2::theme_classic()$axis.line))
 purrr::iwalk(
   list(
-    "point" = list(size = 1 * size_param, stroke = 0.5),
-    "line" = list(linewidth = 0.5 * size_param),
+    "point" = list(size = 0.5 * size_param, stroke = 0.25),
+    "line" = list(linewidth = 0.25 * size_param),
     "text" = list(size = 12 / ggplot2::.pt, lineheight = 1),
-    "boxplot" = list(linewidth = 0.5 * size_param),
-    "violin" = list(linewidth = 0.5 * size_param),
-    "smooth" = list(linewidth = 0.75 * size_param)),
+    "density" = list(linewidth = 0.5 * size_param),
+    "smooth" = list(linewidth = 0.25 * size_param)),
   \(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
 ```
 
@@ -80,7 +88,7 @@ gas_demand <-
       dplyr::case_match(
         "Demand Actual, LDZ (SC), D+6" ~ "GasDemand",
         "Composite Weather Variable, Actual, LDZ(SC), D+1" ~
-          "CompositeWeatherVariable"),
+          "CWV"),
     QualityIndicator =
       `Quality Indicator` %>%
       dplyr::case_match(
@@ -106,7 +114,7 @@ holidays <-
 ```{r}
 gas_demand_wide <-
   gas_demand %>%
-  # remove outliers
+  # delete outliers
   dplyr::mutate(
     Value =
       dplyr::case_when(
@@ -138,6 +146,7 @@ gas_demand_wide <-
 ```
 
 
+
 ```{r}
 # remove outliers
 gas_demand_wide <-
@@ -146,31 +155,42 @@ gas_demand_wide <-
 ```
 
 
+
 ```{r}
 # train test split
 gas_demand_train <-
   gas_demand_wide %>%
   dplyr::filter(Date < lubridate::make_date(2024, 1, 1))
-```
-
-
-```{r}
-model1 <- stats::lm(
-  GasDemand ~ Sin + Cos,
-  data = gas_demand_train %>% mutate(
-    Sin = sin(2 * pi * unclass(Date) / 365),
-    Cos = cos(2 * pi * unclass(Date) / 365))
-)
+gas_demand_test <-
+  gas_demand_wide %>%
+  dplyr::filter(Date >= lubridate::make_date(2024, 1, 1))
 ```
 
 ```{r}
-model2 <- stats::lm(
-  log(GasDemand) ~ Sin + Cos,
-  data = gas_demand_train %>% mutate(
-    Sin = sin(2 * pi * unclass(Date) / 365),
-    Cos = cos(2 * pi * unclass(Date) / 365))
-)
+freq <- 2 * pi / 365
+
+gas_demand_train %<>%
+  dplyr::mutate(
+    Cos = cos(freq * unclass(Date)),
+    Sin = sin(freq * unclass(Date)))
+
+model_trig <-
+  stats::lm(
+    formula = log(GasDemand) ~ Cos + Sin,
+    data = gas_demand_train)
+
+phase <- atan2(model_trig$coefficients[["Cos"]], model_trig$coefficients[["Sin"]]) / freq
+phase %<>% round()
+
+gas_demand_train %<>%
+  dplyr::mutate(
+    Trig = sin(freq * (unclass(Date) + phase)))
+gas_demand_test %<>%
+  dplyr::mutate(
+    Trig = sin(freq * (unclass(Date) + phase)))
 ```
+
+
 
 ```{r}
 merge_residuals <- function(model) {
@@ -186,13 +206,24 @@ merge_residuals <- function(model) {
 }
 ```
 
+
 ```{r}
 quality_colour <- c("grey", "Amended" = "red", "Late" = "orange")
 weekday_colour = c()
 names(weekday_colour) <- c()
 
-plot_item_vs_time <- function(item) {
-  gas_demand %>%
+seperate_legend <- function(plot) {
+  legend <- cowplot::get_legend(plot)
+  cowplot::plot_grid(
+    plot + ggplot2::theme(legend.position = "none"),
+    legend,
+    ncol = 2,
+    rel_widths = c(1, 0.3))
+}
+
+plot_item_vs_date <- function(item) {
+  plot <-
+    gas_demand %>%
     dplyr::filter(DataItem == item) %>%
     ggplot2::ggplot(
       mapping = ggplot2::aes(
@@ -200,41 +231,33 @@ plot_item_vs_time <- function(item) {
         y = Value,
         colour = QualityIndicator)) +
     ggplot2::scale_colour_manual(values = quality_colour) +
-    ggplot2::geom_point(size = 0.75 * size_param) +
+    ggplot2::geom_point() +
     ggplot2::labs(
-      # title = paste(item, "vs Date"),
-      y = item)
+      y = item,
+      colour = "")
+  seperate_legend(plot)
 }
 
-plot_item_vs_quality <- function(item) {
-  gas_demand %>%
-    dplyr::filter(DataItem == item) %>%
+plot_variable <- function(variable) {
+  plot1 <-
+    gas_demand_wide %>%
     ggplot2::ggplot(
       mapping = ggplot2::aes(
-        x = QualityIndicator,
-        y = Value,
-        colour = QualityIndicator)) +
-    ggplot2::scale_colour_manual(values = quality_colour) +
-    ggplot2::geom_boxplot(
-      outliers = FALSE,
-      varwidth = TRUE) +
-    ggplot2::geom_violin(
+        x = Date,
+        y = {{ variable }})) +
+    ggplot2::geom_line()
+  plot2 <-
+    gas_demand_wide %>%
+    ggplot2::ggplot(
       mapping = ggplot2::aes(
-        fill = ggplot2::after_scale(colour)),
-      data = . %>% dplyr::filter(QualityIndicator == ""),
-      alpha = 0.38,
-      show.legend = FALSE) +
-    ggplot2::geom_dotplot(
-      mapping = ggplot2::aes(
-        fill = ggplot2::after_scale(colour)),
-      data = . %>% dplyr::filter(QualityIndicator != ""),
-      alpha = 0.38,
-      binaxis = "y",
-      stackdir = "center",
-      dotsize = 0.5) +
-    ggplot2::labs(
-      # title = paste(item, "vs Quality Indicator"),
-      y = item)
+        x = {{ variable }})) +
+    ggplot2::geom_density()
+  cowplot::plot_grid(
+    plot1,
+    plot2,
+    align = "h",
+    ncol = 2
+  )
 }
 
 create_plot <- function(data = gas_demand_wide, x, y) {
@@ -251,229 +274,322 @@ create_plot <- function(data = gas_demand_wide, x, y) {
 
 \newpage
 
+# Introduction {#sec-intro}
 
+Natural gas is an important energy resource, which is used across all regions and in various sectors, including industry and electricity generation [@iea2025review].
+To satisfy its demands, a sufficient and economic supply is important, and requires accurate forecasts.
 
-```{r}
-#| fig-cap: Gas Demand vs Date
+Multiple factors can influence gas demand and forecast accuracy, including temperature, wind speed, seasonal activities, and special events.
 
-plot_item_vs_time("GasDemand")
-```
+This study aims to forecast natural gas demands in Scotland from several days ahead, evaluate prediction intervals, and furthermore determine what factors affect forecast uncertainty.
 
-```{r}
-#| fig-cap: Composite Weather Variable vs Date
+# Data and Exploratory Analysis {#sec-eda}
 
-plot_item_vs_time("CompositeWeatherVariable")
-```
+## Data Source
 
-```{r}
-#| label: fig-aaa
-#| fig-cap: Plots of Gas Demand
-#| fig-subcap:
-#| - ""
-#| - ""
-#| layout-ncol: 2
-
-create_plot(x = Date, y = GasDemand) +
-  ggplot2::geom_line()
-
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = GasDemand)) +
-  ggplot2::geom_density()
-```
-
-```{r}
-#| label: fig-aaa2
-#| fig-cap: Plots of log-transformed Gas Demand
-#| fig-subcap:
-#| - ""
-#| - ""
-#| layout-ncol: 2
-
-create_plot(x = Date, y = log(GasDemand)) +
-  ggplot2::geom_line()
-
-gas_demand_wide %>%
-  ggplot2::ggplot(
-    mapping = ggplot2::aes(
-      x = log(GasDemand))) +
-  ggplot2::geom_density()
-```
-
-```{r}
-#| label: fig-bbb
-#| fig-cap: Gas Demand vs Date by Day of the Week
-
-create_plot(x = Date, y = GasDemand) +
-  ggplot2::aes(
-    colour = DayOfTheWeek) +
-  ggplot2::geom_point(stroke = 0) +
-  ggplot2::geom_smooth(
-    method = "loess",
-    se = FALSE,
-    span = 0.25)
-```
-
-```{r}
-#| label: fig-bbb2
-#| fig-cap: Gas Demand vs Composite Weather Variable
-#| fig-subcap:
-#| - ""
-#| - ""
-#| layout-ncol: 2
-
-create_plot(x = CompositeWeatherVariable, y = GasDemand) +
-  ggplot2::geom_point()
-
-create_plot(x = CompositeWeatherVariable, y = GasDemand) +
-  ggplot2::aes(
-    colour = Holiday) +
-  ggplot2::geom_point()
-```
-
-
-
-# Introduction
-
-Natural gas is an important energy resource,
-which is used across all regions and in various sectors,
-including industry and electricity generation [@iea2025review].
-To satisfy its demands,
-a sufficient and economic supply is important,
-and requires accurate forecasts.
-
-Multiple factors can influence gas demand and forecast accuracy,
-including temperature, wind speed, seasonal activities, and special events.
-
-This study aims to forecast natural gas demands in Scotland from several days ahead,
-evaluate prediction intervals,
-and furthermore determine what factors affect forecast uncertainty.
-
-# Data and Exploratory Analysis
-
-Historic gas demand data and weather data from 2021 to 2024 were retrieved from National Gas,
-which owns the National Transmission System that transports gas across Great Britain [@nationalgasdata].
+Historic natural gas demand data and weather data for Scotland from 2021 to 2024 were retrieved from National Gas, which is the owner of the National Transmission System that transports natural gas across Great Britain [@nationalgasdata].
 Bank holiday data were taken from UK government API [@ukholiday].
 
-
+Data from National Gas are partially shown in @tbl-data-example.
+Column **Applicable For** refers to the date to which the observation applies.
+Column **Quality Indicator** indicates quality of the observation, where value *A* means amended, and value *L* means late.
 
 ```{r}
-#| label: tab-data-example
+#| label: tbl-data-example
 #| tab-cap: Part of the Data
 
 gas_demand_raw %>%
   dplyr::select(`Applicable For`:Value, `Quality Indicator`) %>%
-  utils::head(n = 6) %>%
-  knitr::kable()
+  utils::head(n = 6)
 ```
 
-The gas demand data measures actual natural gas demand in mega standard cubed metre (MSm$^3$) for Scotland and for the given date.
-@fig-demand shows the annual seasonality and several outliers to remove.
+Data item *Demand Actual, LDZ (SC), D+6* refers to natural gas demand for the Local Distribution Zone of Scotland for the given date, which is measured in mega standard cubed metre (MSm^3^).
+
+@fig-demand-raw plots natural gas demand against date, and highlights observations with quality indicator labels.
+It can be observed that the data exhibit annual seasonality, and several outliers locate out of the pattern.
+To be specific, late data items with value $5.4$, and amended data items were considered as outliers, and would be removed in further analysis.
+
+```{r}
+#| label: fig-demand-raw
+#| fig-cap: Scatter Plot of Gas Demand against Date
+#| fig-width: 4.6063
+
+plot_item_vs_date("GasDemand")
+```
+
+Data item *Composite Weather Variable, Actual, LDZ(SC), D+1* refers to composite weather variable (CWV) for the Local Distribution Zone of Scotland for the given date, which is calculated from temperature and wind speed.
+
+@fig-cwv-raw plots composite weather variable against date.
+No obvious outliers are observed through the figure.
+
+```{r}
+#| label: fig-cwv-raw
+#| fig-cap: Scatter Plot of Composite Weather Variable against Date
+#| fig-width: 4.6063
+
+plot_item_vs_date("CWV")
+```
+
+## Univariate Analysis
+
+After removing the outliers, further exploratory analysis were applied to describe the data.
+
+@fig-demand shows the trends and distribution of natural gas demand.
+Overall, there is an decreasing trend over time.
+Also, an annual seasonality exists in the data, such that gas demand increases from August to January, and decreases from February to July.
+
+Furthermore, it can be observed that the variance in gas demand turns large in winter days, and turns small in summer days.
+As for the density plot, the distribution is bimodal and right-skewed, with the right mode smaller than the left mode.
+In summary, these discoveries indicate that a transformation to the data is plausible, in order to make the distribution better for modelling.
 
 ```{r}
 #| label: fig-demand
 #| fig-cap: Plots of Gas Demand
-#| fig-subcap:
-#| - ""
-#| - ""
-#| layout-ncol: 2
+#| fig-width: 7.0866
 
-plot_item_vs_time("GasDemand")
-
-plot_item_vs_quality("GasDemand")
+plot_variable(GasDemand)
 ```
 
-After removing the outliers, a more detailed plot (@fig-demand-date) shows the differences in gas demand levels between day of the week.
-The gas demand level in weekends are lower than the gas demand level in weekdays.
+@fig-log-demand describes the log-transformed natural gas demand data.
+The variance turns stable, and the distribution is less skewed.
 
 ```{r}
-#| label: fig-demand-date
-#| fig-cap: Gas Demand vs Date by Day of the Week
+#| label: fig-log-demand
+#| fig-cap: Plots of log-transformed Gas Demand
+#| fig-width: 7.0866
 
-create_plot(x = Date, y = GasDemand) +
-  ggplot2::aes(
-    colour = DayOfTheWeek) +
-  ggplot2::geom_point(stroke = 0) +
-  ggplot2::geom_smooth(
-    method = "loess",
-    se = FALSE,
-    span = 0.25)
+plot_variable(log(GasDemand))
 ```
 
-The composite weather variable (CWV) is calculated from temperature and wind speed.
-@fig-cwv shows no obvious outliers.
+As for the composite weather variable, @fig-cwv shows its seasonality and distribution.
+It increases from February to July and decreases from August to January annually, and has larger variance in winter days and smaller variance in summer days.
+The distribution is bimodal and left-skewed, with the left mode smaller than the right mode.
 
 ```{r}
 #| label: fig-cwv
 #| fig-cap: Plots of Composite Weather Variable
-#| fig-subcap:
-#| - ""
-#| - ""
-#| layout-ncol: 2
+#| fig-width: 7.0866
 
-plot_item_vs_time("CompositeWeatherVariable")
-
-plot_item_vs_quality("CompositeWeatherVariable")
+plot_variable(CWV)
 ```
 
-# Methodologies
+## Multivariate Analysis
 
-# Formal Analysis
+After univariate analysis, relationship between variables were evaluated.
 
-$$A \sin(\frac{2 \pi}{365}x + \phi) = A \sin\phi \cos\frac{2 \pi}{365}x + A \cos\phi \sin\frac{2 \pi}{365}x$$
-
-$$\operatorname{E}[y] = \beta_0 + \beta_1 \cos\frac{2 \pi}{365}x + \beta_2 \sin\frac{2 \pi}{365}x$$
+@fig-demand-cwv shows a strong linear relationship between natural gas demand and composite weather variable.
+Also, it can be observed that when CWV becomes smaller, the variance in natural gas demand becomes larger.
 
 ```{r}
-gas_demand_train %>%
-  create_plot(x = Date, y = log(GasDemand)) +
-  ggplot2::geom_line() +
-  ggplot2::geom_line(
+#| label: fig-demand-cwv
+#| fig-cap: Scatter Plot of Gas Demand against Composite Weather Variable
+
+gas_demand_wide %>%
+  ggplot2::ggplot(
     mapping = ggplot2::aes(
-      y = model2$fitted.values
-    ),
-    colour = "red",
-    linewidth = 0.75 * size_param
-  )
+      x = CWV,
+      y = GasDemand)) +
+  ggplot2::geom_point()
 ```
 
-```{r}
-# atan2(model2$coefficients[["Sin"]], model2$coefficients[["Cos"]])
+Since this study aims to give prediction of natural gas demand several days ahead, the weather data on the date in question would not be available when making prediction.
+Therefore, evaluating the relationship between composite weather variable several days before and natural gas demand would be an approach.
 
+@fig-demand-lag-cwv illustrates the relationship between CWV several days ahead and natural gas demand.
+There exists a negative linear relationship through all the plots.
+However, as the date gap becomes larger, the variance in natural gas demand becomes larger.
+
+```{r}
+#| label: fig-demand-lag-cwv
+#| fig-cap: Plots of Gas Demand against lagged Composite Weather Variable
+#| fig-width: 7.0866
+#| fig-height: 6.5697
+
+lapply(
+  0:5,
+  FUN = function(i) gas_demand_wide %>%
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(
+        x = CWV %>% dplyr::lag(n = i),
+        y = GasDemand)) +
+    ggplot2::geom_point() +
+    ggplot2::labs(
+      x = paste("CWV", "lag", i))) -> ps
+cowplot::plot_grid(
+  plotlist = ps,
+  ncol = 2,
+  align = "hv")
+```
+
+Holiday is also an important factor affecting natural gas demand.
+@fig-demand-weekday shows the differences in natural gas demand levels between each day of the week.
+The gas demand level in weekends are lower than that in weekdays.
+Therefore, it is plausible to combine weekends and weekdays respectively and transform day of the week into a binary variable.
+In further analysis, weekends and bank holidays would be categorized as holidays, with the remaining categorized as non-holidays.
+
+```{r}
+#| label: fig-demand-weekday
+#| fig-cap: Plot of Gas Demand against Date by Week Day
+#| fig-width: 4.6063
+
+gas_demand_wide %>%
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = Date,
+      y = log(GasDemand),
+      colour = DayOfTheWeek)) +
+  ggplot2::geom_point() +
+  ggplot2::geom_smooth(
+    method = "loess",
+    se = FALSE,
+    span = 0.25) +
+  ggplot2::labs(
+    colour = "") -> p
+seperate_legend(p)
+```
+
+The interaction of composite weather variable and holiday was also considered.
+@fig-demand-cwv-holiday shows that the linear effect of CWV in holidays is smaller than that in non-holidays.
+
+```{r}
+#| label: fig-demand-cwv-holiday
+#| fig-cap: Scatter Plot of Gas Demand against Composite Weather Variable by Holiday
+#| fig-width: 4.6063
+
+gas_demand_wide %>%
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = CWV,
+      y = GasDemand,
+      colour = Holiday)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(
+    colour = "") -> p
+seperate_legend(p)
+```
+
+# Methodologies {#sec-method}
+
+# Formal Analysis {#sec-model}
+
+As is shown in @sec-eda, there exists a seasonal trend in log-transformed natural gas demand.
+The trigonometric function $\sin(\frac{2 \pi}{365} (x + \phi))$ was used in modelling the seasonality, where $x$ is the date index, and $\phi$ is the phase shift.
+Since
+$$
+\sin(\frac{2 \pi}{365} (x + \phi)) = \sin \frac{2 \pi}{365} \phi \cdot \cos \frac{2 \pi}{365} x + \cos \frac{2 \pi}{365} \phi \cdot \sin \frac{2 \pi}{365} x,
+$$
+the phase shift can be approximately determined by fitting the linear model
+$$
+y_i = \beta_0 + \beta_1 \cos \frac{2 \pi}{365} x_i + \beta_2 \sin \frac{2 \pi}{365} x_i + \varepsilon_i,
+$$ {#eq-lm-trig}
+where $y_i$ is the log-transformed natural gas demand, $x_i$ is the date index, $\varepsilon \sim \operatorname{N}(0, \sigma^2)$ independently.
+
+@fig-lm-trig shows the results of @eq-lm-trig.
+The estimated coefficients are $\hat{\beta_1} =$ `r model_trig$coefficients[["Cos"]]` and $\hat{\beta_2} =$ `r model_trig$coefficients[["Sin"]]`.
+Therefore, the phase shift $\phi$ is `r phase` days.
+
+```{r}
+#| label: fig-lm-trig
+#| fig-cap: Scatter Plot of Fitted Values of @eq-lm-trig
+
+gas_demand_train %>%
+  dplyr::mutate(
+    Predict =
+      stats::predict.lm(
+        model_trig,
+        newdata = gas_demand_train)) %>%
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(
+      x = Date,
+      y = log(GasDemand))) +
+  ggplot2::geom_point() +
+  ggplot2::geom_point(
+    mapping = ggplot2::aes(
+      y = Predict),
+    colour = "red")
+```
+
+
+
+```{r}
 model <-
   mgcv::gam(
     formula =
-      log(GasDemand) ~ s(unclass(Date)) + s(Trigon),
+      log(GasDemand) ~ s(unclass(Date)) + s(Trigon) + Holiday,
     data = gas_demand_train %>% mutate(
-      Trigon = sin(2 * pi * (unclass(Date) + 55) / 365)))
+      Trigon = sin(2 * pi * (unclass(Date) + 56) / 365)))
 
 summary(model)
 
 gas_demand_train %>%
   create_plot(x = Date, y = log(GasDemand)) +
-  ggplot2::geom_line() +
-  ggplot2::geom_line(
+  ggplot2::geom_point() +
+  ggplot2::geom_point(
     mapping = ggplot2::aes(
-      y = model$y - model$residuals
-    ),
-    colour = "red"
-  )
+      y = model$y - model$residuals),
+    colour = "red")
 
 merge_residuals(model) %>%
   create_plot(x = Date, y = Residual) +
   geom_line()
 
-stats::acf(stats::residuals(model))
-stats::pacf(stats::residuals(model))
+stats::acf(stats::residuals(model), main = "")
+stats::pacf(stats::residuals(model), main = "")
 ```
 
 ```{r}
 model.arma <- stats::arima(stats::residuals(model), order = c(2, 0, 0))
-
-stats::acf(stats::residuals(model.arma))
-stats::pacf(stats::residuals(model.arma))
+stats::acf(stats::residuals(model.arma), main = "")
+stats::pacf(stats::residuals(model.arma), main = "")
 ```
+
+```{r}
+model <-
+  mgcv::gam(
+    formula =
+      log(GasDemand) ~ s(CWV %>% dplyr::lag(7)) + Holiday,
+    data = gas_demand_train)
+
+summary(model)
+
+gas_demand_train %>%
+  dplyr::mutate(
+    CWV = CWV %>% dplyr::lag(7)) %>%
+  stats::na.omit() %>%
+  dplyr::mutate(
+    fit = model$y - model$residuals) %>%
+  create_plot(x = CWV, y = log(GasDemand)) +
+  ggplot2::geom_point() +
+  ggplot2::geom_point(
+    mapping = ggplot2::aes(
+      y = fit),
+    colour = "red")
+
+gas_demand_train %>%
+  dplyr::mutate(
+    CWV = CWV %>% dplyr::lag(7)) %>%
+  stats::na.omit() %>%
+  create_plot(x = Date, y = model$residuals) +
+  ggplot2::geom_line()
+```
+
+```{r}
+model <-
+  mgcv::gam(
+    formula =
+      log(GasDemand) ~ s(CWV %>% dplyr::lag(7)) + Holiday + s(unclass(Date)) + s(Trigon),
+    data = gas_demand_train %>% mutate(
+      Trigon = sin(2 * pi * (unclass(Date) + 55) / 365)))
+
+gas_demand_train %>%
+  dplyr::mutate(
+    CWV = CWV %>% dplyr::lag(7)) %>%
+  stats::na.omit() %>%
+  create_plot(x = Date, y = model$residuals) +
+  ggplot2::geom_line()
+```
+
+# Conclusion {#sec-conclusion}
 
 \newpage
 
@@ -482,38 +598,16 @@ stats::pacf(stats::residuals(model.arma))
 ::: {#refs}
 :::
 
-```{r}
-create_plot(x = Date, y = GasDemand) +
-  ggplot2::geom_line()
-```
-
-```{r}
-create_plot(x = Date, y = CompositeWeatherVariable) +
-  ggplot2::geom_line()
-```
-
-```{r}
-create_plot(x = CompositeWeatherVariable, y = GasDemand) +
-  ggplot2::geom_point()
-```
-
-```{r}
-create_plot(x = CompositeWeatherVariable, y = GasDemand) +
-  ggplot2::aes(
-    colour = Holiday) +
-  ggplot2::geom_point()
-```
-
 ```{r, eval=FALSE}
 model <-
   stats::lm(
-    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
-    data = gas_demand_wide)
+    formula = GasDemand ~ CWV * Holiday,
+    data = gas_demand_train)
 
 summary(model)
 
 merge_residuals(model) %>%
-  create_plot(x = `Gas Day`, y = Residual) +
+  create_plot(x = Date, y = Residual) +
   geom_line()
 ```
 
@@ -521,15 +615,15 @@ merge_residuals(model) %>%
 model <-
   stats::lm(
     formula =
-      `Gas Demand` ~
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)),
-    data = gas_demand_wide)
+      GasDemand ~
+      I(sin(2 * pi * unclass(Date) / 365)) +
+      I(cos(2 * pi * unclass(Date) / 365)),
+    data = gas_demand_train)
 
 summary(model)
 
 merge_residuals(model) %>%
-  create_plot(x = `Gas Day`, y = Residual) +
+  create_plot(x = Date, y = Residual) +
   geom_line()
 ```
 
@@ -537,15 +631,15 @@ merge_residuals(model) %>%
 model <-
   stats::lm(
     formula =
-      `Gas Demand` ~
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
-    data = gas_demand_wide)
+      GasDemand ~
+      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
+    data = gas_demand_train)
 
 summary(model)
 
 merge_residuals(model) %>%
-  create_plot(x = `Gas Day`, y = Residual) +
+  create_plot(x = Date, y = Residual) +
   geom_line()
 ```
 
@@ -553,50 +647,50 @@ merge_residuals(model) %>%
 model <-
   stats::lm(
     formula =
-      `Gas Demand` ~
-      `Composite Weather Variable` * Holiday +
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
-    data = gas_demand_wide)
+      GasDemand ~
+      CWV * Holiday +
+      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
+    data = gas_demand_train)
 ```
 
 ```{r, eval=FALSE}
 model <-
   gamlss::gamlss(
-    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
-    sigma.formula =`Gas Demand` ~ `Composite Weather Variable` * Holiday,
-    data = gas_demand_wide %>% stats::na.omit())
+    formula = GasDemand ~ CWV * Holiday,
+    sigma.formula = GasDemand ~ CWV * Holiday,
+    data = gas_demand_train)
 ```
 
 ```{r, eval=FALSE}
 model <-
   gamlss::gamlss(
     formula =
-      `Gas Demand` ~
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)) * Holiday,
+      GasDemand ~
+      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
+      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
     sigma.formula =
-      `Gas Demand` ~
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)) ,
-    data = gas_demand_wide %>% stats::na.omit())
+      GasDemand ~
+      I(sin(2 * pi * unclass(Date) / 365)) +
+      I(cos(2 * pi * unclass(Date) / 365)) ,
+    data = gas_demand_train)
 
 summary(model)
 
 merge_residuals(model) %>%
-  create_plot(x = `Gas Day`, y = Residual) +
+  create_plot(x = Date, y = Residual) +
   geom_line()
 ```
 
 ```{r, eval=FALSE}
 model <-
   gamlss::gamlss(
-    formula = `Gas Demand` ~ `Composite Weather Variable` * Holiday,
+    formula = GasDemand ~ CWV * Holiday,
     sigma.formula =
-      `Gas Demand` ~
-      I(sin(2 * pi * unclass(`Gas Day`) / 365)) +
-      I(cos(2 * pi * unclass(`Gas Day`) / 365)),
-    data = gas_demand_wide %>% stats::na.omit())
+      GasDemand ~
+      I(sin(2 * pi * unclass(Date) / 365)) +
+      I(cos(2 * pi * unclass(Date) / 365)),
+    data = gas_demand_train)
 ```
 
 ```{r, eval=FALSE}

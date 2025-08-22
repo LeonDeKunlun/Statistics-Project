@@ -40,6 +40,8 @@ library(mgcv)
 ```
 
 ```{r, results='hide'}
+set.seed(42)
+
 # set locale
 sys_locale <- "en_GB.utf8"
 Sys.setlocale(locale = sys_locale)
@@ -68,6 +70,9 @@ purrr::iwalk(
     "density" = list(linewidth = 0.5 * size_param),
     "smooth" = list(linewidth = 0.25 * size_param)),
   \(x, idx) ggplot2::update_geom_defaults(geom = idx, new = x))
+
+options(
+  digits = 4)
 ```
 
 ```{r}
@@ -145,25 +150,12 @@ gas_demand_wide <-
       factor(levels = c("None", "Holiday")))
 ```
 
-
-
-```{r}
-# remove outliers
-gas_demand_wide <-
-  gas_demand_wide %>%
-  stats::na.omit()
-```
-
-
-
 ```{r}
 # train test split
 gas_demand_train <-
   gas_demand_wide %>%
   dplyr::filter(Date < lubridate::make_date(2024, 1, 1))
-gas_demand_test <-
-  gas_demand_wide %>%
-  dplyr::filter(Date >= lubridate::make_date(2024, 1, 1))
+gas_demand_test <- gas_demand_wide
 ```
 
 ```{r}
@@ -184,33 +176,105 @@ phase %<>% round()
 
 gas_demand_train %<>%
   dplyr::mutate(
-    Trig = sin(freq * (unclass(Date) + phase)))
+    Trig = sin(freq * (unclass(Date) + phase)),
+    CWV = CWV %>% dplyr::lag(n = 7))
 gas_demand_test %<>%
   dplyr::mutate(
-    Trig = sin(freq * (unclass(Date) + phase)))
+    Trig = sin(freq * (unclass(Date) + phase)),
+    CWV = CWV %>% dplyr::lag(n = 7))
 ```
 
+```{r}
+model_gam <-
+  mgcv::gam(
+    formula =
+      log(GasDemand) ~ s(unclass(Date)) + s(Trig) + s(CWV) + Holiday,
+    data = gas_demand_train)
 
+gas_demand_gam_fitted <-
+  gas_demand_train %>%
+  dplyr::mutate(
+    FittedValue =
+      mgcv::predict.gam(
+        model_gam,
+        newdata = gas_demand_train,
+        type = "response"),
+    Residual = log(GasDemand) - FittedValue)
+```
 
 ```{r}
-merge_residuals <- function(model) {
-  gas_demand_train %>%
-    stats::na.omit() %>%
-    dplyr::mutate(
-      Residual = model %>% stats::residuals()) %>%
-    dplyr::select(Date, Residual) %>%
-    dplyr::right_join(
-      gas_demand_train,
-      by = dplyr::join_by(Date),
-      relationship = "one-to-one")
+model_arima <-
+  stats::arima(
+    gas_demand_gam_fitted$Residual,
+    order = c(2, 0, 0),
+    include.mean = FALSE)
+```
+
+```{r}
+gas_demand_test %<>%
+  dplyr::mutate(
+    FittedValue =
+      mgcv::predict.gam(
+        model_gam,
+        newdata = gas_demand_test,
+        type = "response"),
+    Residual = log(GasDemand) - FittedValue)
+```
+
+```{r}
+gas_demand_test %<>%
+  dplyr::mutate(
+    "-1" := Residual %>% dplyr::lag(n = 1),
+    "0" := Residual)
+for (i in 1:7) {
+  alpha1 <- model_arima$coef[["ar1"]]
+  alpha2 <- model_arima$coef[["ar2"]]
+  
+  gas_demand_test[[as.character(i)]] <-
+    alpha1 * gas_demand_test[[as.character(i - 1)]] +
+    alpha2 * gas_demand_test[[as.character(i - 2)]]
+}
+for (i in 1:7) {
+  gas_demand_test[[as.character(i)]] <-
+    gas_demand_test[[as.character(i)]] %>% dplyr::lag(i) +
+    gas_demand_test[["FittedValue"]]
+}
+gas_demand_test %<>%
+  dplyr::select(!c("-1", "0"))
+```
+
+```{r}
+N <- 10000
+alp = 0.95
+prediction_intervals <- matrix(nrow = 7, ncol = 2)
+
+gas_demand_bootstrap <-
+  gas_demand_test %>%
+  dplyr::filter(Date < lubridate::make_date(2024, 1, 1)) %>%
+  stats::na.omit()
+
+for (i in 1:7) {
+  sample(
+    gas_demand_bootstrap$GasDemand %>% log() - gas_demand_bootstrap[[as.character(i)]],
+    size = N,
+    replace = TRUE) -> x
+  prediction_intervals[i, ] <-
+    stats::quantile(
+      x,
+      probs = c((1 - alp) / 2, (1 + alp) / 2))
 }
 ```
 
+```{r}
+gas_demand_test %<>%
+  dplyr::filter(Date >= lubridate::make_date(2024, 1, 1))
+```
 
 ```{r}
 quality_colour <- c("grey", "Amended" = "red", "Late" = "orange")
-weekday_colour = c()
-names(weekday_colour) <- c()
+weekday_colour <-
+  c(scales::pal_hue(h = c(15, 45))(5), scales::pal_hue(h = c(195, 225))(2))
+names(weekday_colour) <- levels(weekends)
 
 seperate_legend <- function(plot) {
   legend <- cowplot::get_legend(plot)
@@ -260,15 +324,80 @@ plot_variable <- function(variable) {
   )
 }
 
-create_plot <- function(data = gas_demand_wide, x, y) {
-  data %>%
+plot_acfs <- function(x) {
+  ci <- stats::qnorm((1 + 0.95) / 2) / sqrt(length(x))
+  plot_acf <- function(FUN) {
+    FUN(x, plot = FALSE, na.action = stats::na.pass) %>%
+      with(data.frame(lag, acf)) %>%
+      ggplot2::ggplot(
+        mapping = ggplot2::aes(
+          x = lag,
+          xend = lag,
+          y = acf,
+          yend = 0)) +
+      ggplot2::geom_hline(
+        yintercept = 0) +
+      ggplot2::geom_hline(
+        yintercept = ci,
+        colour = "blue",
+        linetype = "dashed") +
+      ggplot2::geom_hline(
+        yintercept = -ci,
+        colour = "blue",
+        linetype = "dashed") +
+      ggplot2::geom_segment()
+  }
+  plot1 <-
+    plot_acf(stats::acf) +
+    ggplot2::labs(
+      y = "ACF")
+  plot2 <-
+    plot_acf(stats::pacf) +
+    ggplot2::coord_cartesian(
+      xlim = c(0, NA)) +
+    ggplot2::labs(
+      y = "Partial ACF")
+  cowplot::plot_grid(
+    plot1,
+    plot2,
+    align = "h",
+    ncol = 2
+  )
+}
+
+plot_predict <- function(i) {
+  gas_demand_test %>%
     ggplot2::ggplot(
       mapping = ggplot2::aes(
-        x = {{ x }},
-        y = {{ y }})) +
+        x = Date)) +
+    ggplot2::geom_line(
+      mapping = ggplot2::aes(
+        y = log(GasDemand))) +
+    ggplot2::geom_point(
+      mapping = ggplot2::aes(
+        y = .data[[as.character(i)]]),
+      colour = "blue") +
     ggplot2::labs(
-      # title = rlang::englue("{{ y }} vs {{ x }}")
-    )
+      y = "log(GasDemand)")
+}
+
+plot_interval <- function(i) {
+  gas_demand_test %>%
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(
+        x = Date)) +
+    ggplot2::geom_ribbon(
+      mapping = ggplot2::aes(
+        ymin = .data[[as.character(i)]] + prediction_intervals[i, 1],
+        ymax = .data[[as.character(i)]] + prediction_intervals[i, 2]),
+      alpha = 0.382,
+      fill = "blue") +
+    ggplot2::geom_line(
+      mapping = ggplot2::aes(
+        y = log(GasDemand))) +
+    ggplot2::labs(
+      x = paste(i, "Day(s) Ahead"),
+      y = "log(GasDemand)")
 }
 ```
 
@@ -424,7 +553,7 @@ cowplot::plot_grid(
 Holiday is also an important factor affecting natural gas demand.
 @fig-demand-weekday shows the differences in natural gas demand levels between each day of the week.
 The gas demand level in weekends are lower than that in weekdays.
-Therefore, it is plausible to combine weekends and weekdays respectively and transform day of the week into a binary variable.
+Therefore, it is plausible to combine weekends and weekdays respectively, and transform day of the week into a binary variable.
 In further analysis, weekends and bank holidays would be categorized as holidays, with the remaining categorized as non-holidays.
 
 ```{r}
@@ -438,6 +567,7 @@ gas_demand_wide %>%
       x = Date,
       y = log(GasDemand),
       colour = DayOfTheWeek)) +
+  ggplot2::scale_colour_manual(values = weekday_colour) +
   ggplot2::geom_point() +
   ggplot2::geom_smooth(
     method = "loess",
@@ -470,10 +600,27 @@ seperate_legend(p)
 
 # Methodologies {#sec-method}
 
+Generalised Additive Models (GAM) and Autoregressive Integrated Moving Average (ARIMA) models were used in this study.
+
+GAM extends the generalised linear models, by replacing the linear term by an additive smooth function [@hastie1986].
+It provides more flexibility for capturing non-linear relationship between explanatory variables and response variable.
+In the case of this study, it helps identifying the non-linear effects of date on the log-transformed natural gas demand.
+
+Model assumption checks followed model fitting, where residual independance, zero-mean and constant variance assumptions were checked.
+
+ARIMA model is a time series model that can model the trend, seasonal variation, and correlation simultaneously [@uog2022apm].
+It is a composition of autoregressive process, moving average process, and differencing, hence it can better fit the data with more flexibility.
+By checking autocorrelation plots of the residuals, the parameters used in ARIMA model were determined.
+
+Bootstrap methods were applied in calculating the prediction intervals [@hyndman2021].
+
 # Formal Analysis {#sec-model}
 
+## Model Fitting and Model Checking {#sec-model-fit}
+
 As is shown in @sec-eda, there exists a seasonal trend in log-transformed natural gas demand.
-The trigonometric function $\sin(\frac{2 \pi}{365} (x + \phi))$ was used in modelling the seasonality, where $x$ is the date index, and $\phi$ is the phase shift.
+The trigonometric function $\sin(\frac{2 \pi}{365} (x + \phi))$ would be used in modelling, where $x$ is the date index, and $\phi$ is the phase shift.
+
 Since
 $$
 \sin(\frac{2 \pi}{365} (x + \phi)) = \sin \frac{2 \pi}{365} \phi \cdot \cos \frac{2 \pi}{365} x + \cos \frac{2 \pi}{365} \phi \cdot \sin \frac{2 \pi}{365} x,
@@ -482,19 +629,22 @@ the phase shift can be approximately determined by fitting the linear model
 $$
 y_i = \beta_0 + \beta_1 \cos \frac{2 \pi}{365} x_i + \beta_2 \sin \frac{2 \pi}{365} x_i + \varepsilon_i,
 $$ {#eq-lm-trig}
-where $y_i$ is the log-transformed natural gas demand, $x_i$ is the date index, $\varepsilon \sim \operatorname{N}(0, \sigma^2)$ independently.
+where\newline
+$y_i$ is log-transformed natural gas demand,\newline
+$x_i$ is date index,\newline
+$\varepsilon \sim \operatorname{N}(0, \sigma^2)$ independently.
 
 @fig-lm-trig shows the results of @eq-lm-trig.
-The estimated coefficients are $\hat{\beta_1} =$ `r model_trig$coefficients[["Cos"]]` and $\hat{\beta_2} =$ `r model_trig$coefficients[["Sin"]]`.
-Therefore, the phase shift $\phi$ is `r phase` days.
+The estimated coefficients are $\hat{\beta_1} =$ `r model_trig$coefficients[["Cos"]] %>% round(3)` and $\hat{\beta_2} =$ `r model_trig$coefficients[["Sin"]] %>% round(3)`.
+Therefore, the phase shift $\phi$ is `r phase` days to the left of 2021 Jan 1^st^.
 
 ```{r}
 #| label: fig-lm-trig
-#| fig-cap: Scatter Plot of Fitted Values of @eq-lm-trig
+#| fig-cap: Scatter Plot of Fitted Values in @eq-lm-trig
 
 gas_demand_train %>%
   dplyr::mutate(
-    Predict =
+    FittedValue =
       stats::predict.lm(
         model_trig,
         newdata = gas_demand_train)) %>%
@@ -505,91 +655,213 @@ gas_demand_train %>%
   ggplot2::geom_point() +
   ggplot2::geom_point(
     mapping = ggplot2::aes(
-      y = Predict),
+      y = FittedValue),
     colour = "red")
 ```
 
+The generalised additive model
+$$
+g(\operatorname{E}[y_i]) = \beta_0 + f_1(x_{1i}) + f_2(x_{2i}) + f_3(x_{3i}) + \beta_4 x_{4i}
+$$ {#eq-gam}
+was applied, where\newline
+$g$ is the identity link function,\newline
+$y_i$ is log-transformed natural gas demand,\newline
+$\beta_i$'s are intercepts,\newline
+$f_i$'s are smooth functions,\newline
+$x_{1i}$ is date index,\newline
+$x_{2i}$ is trigonometric function $\sin(\frac{2 \pi}{365} (x_{1i} + \phi))$ such that $\phi = $ `r phase`,\newline
+$x_{3i}$ is lag 7 composite weather variable,\newline
+$x_{4i}$ is indicator function of holiday.
 
+After fitting @eq-gam, model assumption checks were carried out.
+
+@fig-gam-residual-fitted shows that residuals are evenly scattered around zero, and have constant variance across all levels of the fitted values.
 
 ```{r}
-model <-
-  mgcv::gam(
-    formula =
-      log(GasDemand) ~ s(unclass(Date)) + s(Trigon) + Holiday,
-    data = gas_demand_train %>% mutate(
-      Trigon = sin(2 * pi * (unclass(Date) + 56) / 365)))
+lim <-
+  gas_demand_gam_fitted$Residual %>%
+  abs() %>%
+  max(na.rm = TRUE)
+```
 
-summary(model)
+```{r}
+#| label: fig-gam-residual-fitted
+#| fig-cap: Scatter Plot of Residual against Fitted Value in @eq-gam
 
-gas_demand_train %>%
-  create_plot(x = Date, y = log(GasDemand)) +
-  ggplot2::geom_point() +
-  ggplot2::geom_point(
+gas_demand_gam_fitted %>%
+  ggplot2::ggplot(
     mapping = ggplot2::aes(
-      y = model$y - model$residuals),
-    colour = "red")
-
-merge_residuals(model) %>%
-  create_plot(x = Date, y = Residual) +
-  geom_line()
-
-stats::acf(stats::residuals(model), main = "")
-stats::pacf(stats::residuals(model), main = "")
+      x = FittedValue,
+      y = Residual)) +
+  ggplot2::coord_cartesian(
+    ylim = c(-lim, lim)) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    colour = "grey") +
+  ggplot2::geom_point()
 ```
 
-```{r}
-model.arma <- stats::arima(stats::residuals(model), order = c(2, 0, 0))
-stats::acf(stats::residuals(model.arma), main = "")
-stats::pacf(stats::residuals(model.arma), main = "")
-```
+In @fig-gam-qq, the points fall closely along the diagonal line.
+Therefore, it is safe to assume that the residuals are normally distributed.
 
 ```{r}
-model <-
-  mgcv::gam(
-    formula =
-      log(GasDemand) ~ s(CWV %>% dplyr::lag(7)) + Holiday,
-    data = gas_demand_train)
+#| label: fig-gam-qq
+#| fig-cap: Quantile-Quantile Plot of Residual in @eq-gam
+#| fig-height: 3.5433
 
-summary(model)
-
-gas_demand_train %>%
-  dplyr::mutate(
-    CWV = CWV %>% dplyr::lag(7)) %>%
-  stats::na.omit() %>%
-  dplyr::mutate(
-    fit = model$y - model$residuals) %>%
-  create_plot(x = CWV, y = log(GasDemand)) +
-  ggplot2::geom_point() +
-  ggplot2::geom_point(
+gas_demand_gam_fitted %>%
+  ggplot2::ggplot(
     mapping = ggplot2::aes(
-      y = fit),
-    colour = "red")
-
-gas_demand_train %>%
-  dplyr::mutate(
-    CWV = CWV %>% dplyr::lag(7)) %>%
-  stats::na.omit() %>%
-  create_plot(x = Date, y = model$residuals) +
-  ggplot2::geom_line()
+      sample = Residual)) +
+  ggplot2::coord_cartesian(
+    ylim = c(-lim, lim)) +
+  ggplot2::geom_qq_line(
+    colour = "grey") +
+  ggplot2::geom_qq()
 ```
+
+@fig-gam-acf displays the autocorrelation within the residuals.
+The ACF declines gradually, and the PACF is significantly large until lag $2$.
+These results indicate the residuals are correlated, and potentially follow an autoregressive process of order 2.
 
 ```{r}
-model <-
-  mgcv::gam(
-    formula =
-      log(GasDemand) ~ s(CWV %>% dplyr::lag(7)) + Holiday + s(unclass(Date)) + s(Trigon),
-    data = gas_demand_train %>% mutate(
-      Trigon = sin(2 * pi * (unclass(Date) + 55) / 365)))
+#| label: fig-gam-acf
+#| fig-cap: Autocorrelation Plots of Residual in @eq-gam
+#| fig-width: 7.0866
 
-gas_demand_train %>%
-  dplyr::mutate(
-    CWV = CWV %>% dplyr::lag(7)) %>%
-  stats::na.omit() %>%
-  create_plot(x = Date, y = model$residuals) +
-  ggplot2::geom_line()
+plot_acfs(gas_demand_gam_fitted$Residual)
 ```
 
-# Conclusion {#sec-conclusion}
+According to above discussion, the AR(2) model
+$$
+\varepsilon_t - \alpha_1 \varepsilon_{t-1} - \alpha_2 \varepsilon_{t-2} = Z_t,
+$$ {#eq-arima}
+is applied to the residuals of @eq-gam, where\newline
+$\varepsilon_t$ is the residual at date index $t$,\newline
+$\alpha_i$'s are coefficients,\newline
+$Z_t \sim \operatorname{N}(0, \sigma^2)$ independently.
+
+The model results of @eq-arima are $\hat{\alpha}_1 =$ `r model_arima$coef[["ar1"]] %>% round(3)` and $\hat{\alpha}_2 =$ `r model_arima$coef[["ar2"]] %>% round(3)`.
+
+The fitness of the model is evaluated by @fig-gam-arima.
+Overall, the ACF and PACF are small, although some of them slightly exceed the confidence interval.
+This indicates that the residuals are uncorrelated.
+
+```{r}
+#| label: fig-gam-arima
+#| fig-cap: Autocorrelation Plots of Residual in @eq-arima
+#| fig-width: 7.0866
+
+plot_acfs(residuals(model_arima))
+```
+
+## Point Estimates and Prediction Intervals
+
+The models which are used to give prediction of natural gas demand, are specified in @sec-model-fit.
+
+To forecast natural gas demand $h$ day ahead at date $t$, where $h = 1, \dots, 7$, the point estimate can be calculated by equation
+$$
+g(\hat{y}_{t+h}) = \hat{\beta_0} + \sum_{j=1}^{3} \hat{f_j}(x_{j, t+h}) + \hat{\beta_4} x_{4, t+h} + \hat{\varepsilon}_{t+h},
+$$
+where\newline
+$g$ is the identity link function,\newline
+$\hat{\beta_i}$'s and $\hat{f_j}$'s are the results of @eq-gam, and
+$$
+\hat{\varepsilon}_{t+k} = \hat{\alpha_1} \hat{\varepsilon}_{t+k-1} + \hat{\alpha_2} \hat{\varepsilon}_{t+k-2}, ~ k = 1, \dots, h,
+$$
+and
+$$
+\hat{\varepsilon}_{t+k} = g(y_{t+k}) - (\hat{\beta_0} + \sum_{j=1}^{3} \hat{f_j}(x_{j, t+k}) + \hat{\beta_4} x_{4, t+k}), ~ k \le 0,
+$$
+where\newline
+$\hat{\alpha_i}$'s are the results of @eq-arima.
+
+@fig-pred-1 shows the predicted log-transformed natural gas demand $1$ day ahead on the test set.
+
+```{r}
+#| label: fig-pred-1
+#| fig-cap: Plot of Predicted Value at $h = 1$ over True Value
+
+plot_predict(1)
+```
+
+@tbl-performance summarises model performances on the test set according to the number of days ahead.
+As the number increases, the mean absolute error and mean squared error becomes larger.
+However, the increasing speed slows down, and the MAE and MSE converges, since the residuals exhibits stationary.
+
+```{r}
+#| label: tbl-performance
+#| tbl-cap: Model Performance
+
+gas_demand_test %>%
+  dplyr::mutate(
+    dplyr::across(
+      "1":"7",
+      \(.) . - log(GasDemand))) %>%
+  dplyr::select("1":"7") %>%
+  tidyr::pivot_longer(
+    cols = tidyr::everything(),
+    names_to = "Days Ahead") %>%
+  dplyr::summarise(
+    MAE = mean(abs(value), na.rm = TRUE),
+    MSE = mean(value ^ 2, na.rm = TRUE),
+    .by = `Days Ahead`)
+```
+
+To further evaluate the prediction accuracy, the prediction intervals were calculated through bootstrap methods.
+
+@fig-interval displays the 95% prediction intervals according to the number of days ahead.
+The width of the interval increases as the number becomes larger, but then converges.
+
+```{r}
+#| label: fig-interval
+#| fig-cap: Plots of Prediction Intervals
+#| fig-width: 7.0866
+#| fig-height: 6.5697
+
+lapply(
+  1:6,
+  FUN = . %>% plot_interval()) -> ps
+cowplot::plot_grid(
+  plotlist = ps,
+  ncol = 2,
+  align = "hv")
+```
+
+@tbl-interval shows that the 95% prediction intervals fail to cover 95% of the true values, with the coverages between 83.6% and 94.0%.
+
+```{r}
+#| label: tbl-interval
+#| tbl-cap: 95% Prediction Interval Coverage
+
+m <- prediction_intervals
+colnames(m) <- c("Days Ahead", "Coverage")
+
+for (i in 1:7) {
+  m[[i, 1]] <- i
+  m[[i, 2]] <-
+    mean(
+      gas_demand_test[[as.character(i)]] + prediction_intervals[[i, 1]] <
+        gas_demand_test$GasDemand %>% log()
+      & gas_demand_test$GasDemand %>% log() <
+        gas_demand_test[[as.character(i)]] + prediction_intervals[[i, 2]],
+      na.rm = TRUE)
+}
+
+m %>% as.data.frame()
+```
+
+# Conclusions {#sec-conclusion}
+
+Natural gas demand can be affected by multiple factors, including temperature, wind speeds, holidays, and seasons.
+This study provides a modelling approach using GAM and ARIMA models to predict the trend of natural gas demand from several days ahead.
+Also, the prediction accuracy has been evaluated by estimating the prediction intervals.
+The study hence reveals that the increments in number of days ahead and the quantity of natural gas demand can increase forecast uncertainty.
+
+The GAM and ARIMA model used in this study captured the non-linear relationship between explanatory variables and response variable well, and produced reasonable results that fit the model assumptions.
+It provides plausible short-term forecasts that can be potentially used in natural gas transmission and distribution.
+However, there lacks comparison and selection between different models. Also, the prediction intervals do not perform well for longer forecasts, which might be due to uncaptured variance.
+The future research could introduce more variables, more interaction terms, or different models, and evaluate model performance to compare these models, so that long-term forecasts could be more accurate.
 
 \newpage
 
@@ -597,110 +869,3 @@ gas_demand_train %>%
 
 ::: {#refs}
 :::
-
-```{r, eval=FALSE}
-model <-
-  stats::lm(
-    formula = GasDemand ~ CWV * Holiday,
-    data = gas_demand_train)
-
-summary(model)
-
-merge_residuals(model) %>%
-  create_plot(x = Date, y = Residual) +
-  geom_line()
-```
-
-```{r, eval=FALSE}
-model <-
-  stats::lm(
-    formula =
-      GasDemand ~
-      I(sin(2 * pi * unclass(Date) / 365)) +
-      I(cos(2 * pi * unclass(Date) / 365)),
-    data = gas_demand_train)
-
-summary(model)
-
-merge_residuals(model) %>%
-  create_plot(x = Date, y = Residual) +
-  geom_line()
-```
-
-```{r, eval=FALSE}
-model <-
-  stats::lm(
-    formula =
-      GasDemand ~
-      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
-    data = gas_demand_train)
-
-summary(model)
-
-merge_residuals(model) %>%
-  create_plot(x = Date, y = Residual) +
-  geom_line()
-```
-
-```{r, eval=FALSE}
-model <-
-  stats::lm(
-    formula =
-      GasDemand ~
-      CWV * Holiday +
-      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
-    data = gas_demand_train)
-```
-
-```{r, eval=FALSE}
-model <-
-  gamlss::gamlss(
-    formula = GasDemand ~ CWV * Holiday,
-    sigma.formula = GasDemand ~ CWV * Holiday,
-    data = gas_demand_train)
-```
-
-```{r, eval=FALSE}
-model <-
-  gamlss::gamlss(
-    formula =
-      GasDemand ~
-      I(sin(2 * pi * unclass(Date) / 365)) * Holiday +
-      I(cos(2 * pi * unclass(Date) / 365)) * Holiday,
-    sigma.formula =
-      GasDemand ~
-      I(sin(2 * pi * unclass(Date) / 365)) +
-      I(cos(2 * pi * unclass(Date) / 365)) ,
-    data = gas_demand_train)
-
-summary(model)
-
-merge_residuals(model) %>%
-  create_plot(x = Date, y = Residual) +
-  geom_line()
-```
-
-```{r, eval=FALSE}
-model <-
-  gamlss::gamlss(
-    formula = GasDemand ~ CWV * Holiday,
-    sigma.formula =
-      GasDemand ~
-      I(sin(2 * pi * unclass(Date) / 365)) +
-      I(cos(2 * pi * unclass(Date) / 365)),
-    data = gas_demand_train)
-```
-
-```{r, eval=FALSE}
-model.arma <- stats::arima(stats::residuals(model), order = c(1, 1, 1))
-
-stats::acf(stats::residuals(model.arma))
-stats::pacf(stats::residuals(model.arma))
-```
-
-
-
-
-
